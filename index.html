@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MonoStat — особиста статистика Monobank</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext x='50' y='72' font-size='72' text-anchor='middle'%3E%F0%9F%92%B8%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!--
+    MonoStat — персональний фінансовий трекер на базі Monobank Open API.
+    Файлова структура проєкту:
+      index.html   — цей файл, лише розмітка та підключення style.css / data.js / app.js
+      style.css    — всі стилі та кольорові токени
+      data.js      — "запечені" дефолти: її власні правила категоризації, нотатки,
+                     кастомні категорії та кеш операцій, накопичені за час використання.
+                     Завантажується ПЕРШИМ, до app.js, бо app.js читає ці константи
+                     при ініціалізації стану.
+      app.js       — вся логіка застосунку: підключення до API, категоризація,
+                     рендеринг усіх панелей, зберігання даних.
+    Працює без білд-кроку — просто відкрити index.html у браузері
+    (або "Додати на екран Домой" як PWA).
+  -->
+  <div class="ms-root" id="app"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
