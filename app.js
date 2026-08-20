@@ -300,6 +300,20 @@ async function renameTrip(tripId, newName){
   render();
   await persistTrips();
 }
+async function setTripDates(tripId, dateFrom, dateTo){
+  const trip = state.trips.find(t=>t.id===tripId);
+  if(!trip) return;
+  const validFrom = /^\d{4}-\d{2}-\d{2}$/.test(dateFrom||'');
+  const validTo = /^\d{4}-\d{2}-\d{2}$/.test(dateTo||'');
+  if(!validFrom || !validTo){
+    alert('Дата має бути у форматі РРРР-ММ-ДД, наприклад 2026-06-10.');
+    return;
+  }
+  trip.dateFrom = dateFrom;
+  trip.dateTo = dateTo;
+  render();
+  await persistTrips();
+}
 async function assignTrip(key, tripId){
   if(!tripId) delete state.tripOf[key];
   else state.tripOf[key] = tripId;
@@ -1520,22 +1534,29 @@ function buildTripsPanel(all){
     const sum = txs.reduce((s,t)=>s+Math.abs(t.amount),0);
     const expanded = !!state.expandedTrips?.[trip.id];
 
-    // tickets/hotels booked ahead of time are often charged in UAH from home,
-    // which skews the date range if we just use every tagged transaction. Prefer
-    // foreign-currency transactions (actual spend while abroad) for the real dates;
-    // fall back to everything if the trip has no foreign-currency spend at all.
-    const abroadTxs = txs.filter(t=>t.currency && t.currency!==980);
-    const dateSourceTxs = abroadTxs.length ? abroadTxs : txs;
-
     let dateRangeStr = '';
     let dayCount = 0;
-    if(dateSourceTxs.length){
-      const dates = dateSourceTxs.map(t=>t.date.getTime());
-      const minD = new Date(Math.min(...dates));
-      const maxD = new Date(Math.max(...dates));
-      const fmtD = d=>d.toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'});
-      dateRangeStr = minD.toDateString()===maxD.toDateString() ? fmtD(minD) : `${fmtD(minD)} – ${fmtD(maxD)}`;
-      dayCount = Math.round((new Date(maxD.toDateString()).getTime() - new Date(minD.toDateString()).getTime())/(24*60*60*1000)) + 1;
+    const fmtD = d=>d.toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'});
+    if(trip.dateFrom && trip.dateTo){
+      // manually set — takes priority over any automatic guess
+      const minD = new Date(trip.dateFrom+'T00:00:00');
+      const maxD = new Date(trip.dateTo+'T00:00:00');
+      dateRangeStr = trip.dateFrom===trip.dateTo ? fmtD(minD) : `${fmtD(minD)} – ${fmtD(maxD)}`;
+      dayCount = Math.round((maxD.getTime() - minD.getTime())/(24*60*60*1000)) + 1;
+    }else{
+      // tickets/hotels booked ahead of time are often charged in UAH from home,
+      // which skews the date range if we just use every tagged transaction. Prefer
+      // foreign-currency transactions (actual spend while abroad) for the real dates;
+      // fall back to everything if the trip has no foreign-currency spend at all.
+      const abroadTxs = txs.filter(t=>t.currency && t.currency!==980);
+      const dateSourceTxs = abroadTxs.length ? abroadTxs : txs;
+      if(dateSourceTxs.length){
+        const dates = dateSourceTxs.map(t=>t.date.getTime());
+        const minD = new Date(Math.min(...dates));
+        const maxD = new Date(Math.max(...dates));
+        dateRangeStr = minD.toDateString()===maxD.toDateString() ? fmtD(minD) : `${fmtD(minD)} – ${fmtD(maxD)}`;
+        dayCount = Math.round((new Date(maxD.toDateString()).getTime() - new Date(minD.toDateString()).getTime())/(24*60*60*1000)) + 1;
+      }
     }
 
     const card = document.createElement('div');
@@ -1546,7 +1567,7 @@ function buildTripsPanel(all){
     head.innerHTML = `
       <span class="ms-trip-chevron">${expanded?'▾':'▸'}</span>
       <span class="ms-trip-name">${escapeHtml(trip.name)}</span>
-      ${dateRangeStr ? `<span class="ms-trip-meta">${dateRangeStr}${dayCount>1?' · '+dayCount+' дн.':''}</span>` : ''}
+      ${dateRangeStr ? `<span class="ms-trip-meta">${dateRangeStr}${dayCount>1?' · <b style="color:var(--text)">'+dayCount+' дн.</b>':''}</span>` : ''}
       <span class="ms-trip-meta">${txs.length} оп.</span>
       <span class="ms-trip-sum">${fmt(sum)} ${curSym()}</span>
     `;
@@ -1565,6 +1586,20 @@ function buildTripsPanel(all){
       renameTrip(trip.id, newName);
     });
     head.appendChild(renameBtn);
+    const datesBtn = document.createElement('button');
+    datesBtn.className = 'ms-icon-btn';
+    datesBtn.textContent = '📅';
+    datesBtn.title = 'Задати дати поїздки вручну';
+    datesBtn.addEventListener('click', ()=>{
+      const defFrom = trip.dateFrom || todayStr();
+      const defTo = trip.dateTo || todayStr();
+      const from = prompt('Дата початку поїздки (РРРР-ММ-ДД):', defFrom);
+      if(from===null) return;
+      const to = prompt('Дата кінця поїздки (РРРР-ММ-ДД):', defTo);
+      if(to===null) return;
+      setTripDates(trip.id, from.trim(), to.trim());
+    });
+    head.appendChild(datesBtn);
     const delBtn = document.createElement('button');
     delBtn.className = 'ms-icon-btn';
     delBtn.textContent = '🗑️';
