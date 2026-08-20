@@ -253,6 +253,11 @@
   }
   .ms-note-btn:hover{opacity:.8;}
   .ms-note-btn.has-note{opacity:1;filter:none;}
+  .ms-icon-btn{
+    background:none;border:none;cursor:pointer;font-size:14px;opacity:.5;
+    padding:2px 4px;line-height:1;filter:grayscale(1);
+  }
+  .ms-icon-btn:hover{opacity:1;filter:none;}
   .ms-note-preview{font-size:11px;color:var(--muted);font-style:italic;margin-top:2px;}
   .ms-footer-note{color:var(--muted);font-size:11px;margin-top:20px;line-height:1.6;text-align:center;}
 

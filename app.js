@@ -1520,13 +1520,22 @@ function buildTripsPanel(all){
     const sum = txs.reduce((s,t)=>s+Math.abs(t.amount),0);
     const expanded = !!state.expandedTrips?.[trip.id];
 
+    // tickets/hotels booked ahead of time are often charged in UAH from home,
+    // which skews the date range if we just use every tagged transaction. Prefer
+    // foreign-currency transactions (actual spend while abroad) for the real dates;
+    // fall back to everything if the trip has no foreign-currency spend at all.
+    const abroadTxs = txs.filter(t=>t.currency && t.currency!==980);
+    const dateSourceTxs = abroadTxs.length ? abroadTxs : txs;
+
     let dateRangeStr = '';
-    if(txs.length){
-      const dates = txs.map(t=>t.date.getTime());
+    let dayCount = 0;
+    if(dateSourceTxs.length){
+      const dates = dateSourceTxs.map(t=>t.date.getTime());
       const minD = new Date(Math.min(...dates));
       const maxD = new Date(Math.max(...dates));
       const fmtD = d=>d.toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'});
       dateRangeStr = minD.toDateString()===maxD.toDateString() ? fmtD(minD) : `${fmtD(minD)} – ${fmtD(maxD)}`;
+      dayCount = Math.round((new Date(maxD.toDateString()).getTime() - new Date(minD.toDateString()).getTime())/(24*60*60*1000)) + 1;
     }
 
     const card = document.createElement('div');
@@ -1537,7 +1546,7 @@ function buildTripsPanel(all){
     head.innerHTML = `
       <span class="ms-trip-chevron">${expanded?'▾':'▸'}</span>
       <span class="ms-trip-name">${escapeHtml(trip.name)}</span>
-      ${dateRangeStr ? `<span class="ms-trip-meta">${dateRangeStr}</span>` : ''}
+      ${dateRangeStr ? `<span class="ms-trip-meta">${dateRangeStr}${dayCount>1?' · '+dayCount+' дн.':''}</span>` : ''}
       <span class="ms-trip-meta">${txs.length} оп.</span>
       <span class="ms-trip-sum">${fmt(sum)} ${curSym()}</span>
     `;
@@ -1548,16 +1557,18 @@ function buildTripsPanel(all){
       render();
     });
     const renameBtn = document.createElement('button');
-    renameBtn.className = 'ms-btn secondary';
-    renameBtn.textContent = 'Перейменувати';
+    renameBtn.className = 'ms-icon-btn';
+    renameBtn.textContent = '✏️';
+    renameBtn.title = 'Перейменувати поїздку';
     renameBtn.addEventListener('click', ()=>{
       const newName = prompt('Нова назва поїздки:', trip.name);
       renameTrip(trip.id, newName);
     });
     head.appendChild(renameBtn);
     const delBtn = document.createElement('button');
-    delBtn.className = 'ms-btn secondary';
-    delBtn.textContent = 'Видалити поїздку';
+    delBtn.className = 'ms-icon-btn';
+    delBtn.textContent = '🗑️';
+    delBtn.title = 'Видалити поїздку';
     delBtn.addEventListener('click', ()=>{
       if(confirm(`Видалити поїздку «${trip.name}»? Прив'язки трат до неї теж знімуться (самі трати нікуди не дінуться).`)) deleteTrip(trip.id);
     });
