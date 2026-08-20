@@ -1,9 +1,3 @@
-/* ==========================================================================
-   MonoStat — логіка застосунку
-   Підключення до Monobank Open API, категоризація транзакцій, рендеринг усіх
-   панелей, зберігання даних (window.storage з фолбеком на localStorage).
-   ========================================================================== */
-
 
 (function(){
 try{
@@ -115,7 +109,7 @@ function handleCategoryChange(t, newCat){
 let state = {
   token: '',
   rememberToken: false,
-  initialLoading: true, // true until loadPersisted() resolves — Supabase is a network call now, not instant like localStorage
+  initialLoading: true,
   accounts: [],
   selectedAccount: null,
   from: '',
@@ -159,28 +153,19 @@ let state = {
 };
 
 // ---------- Supabase (реальна база даних, спільна для всіх пристроїв) ----------
-// Заповни своїми даними з Settings → API у Supabase. URL і публічний ключ —
-// безпечно тримати прямо в коді, який побачить браузер (весь захист — на
-// рівні Row Level Security / доступу до самого проєкту, не на секретності
-// цього ключа).
 const SUPABASE_URL = 'https://nysfbpcmcnfzggksvtrj.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_ItiF_W39A9R-D4-vGlOH7Q_3spxqJsH';
 const supabaseClient = (window.supabase && SUPABASE_URL && SUPABASE_KEY)
   ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY)
   : null;
 
-// storage wrapper: Supabase (kv_store table) is now the primary backend, so data
-// syncs across every device/browser instead of staying trapped on one machine.
-// Falls back to window.storage (Claude artifact storage), then localStorage, if
-// Supabase isn't reachable (offline, misconfigured key, etc.) — same behaviour
-// as before, just as a safety net now rather than the main path.
 async function storageGet(key){
   if(supabaseClient){
     try{
       const { data, error } = await supabaseClient.from('kv_store').select('value').eq('key', key).maybeSingle();
       if(error) throw error;
       if(data) return typeof data.value === 'string' ? data.value : JSON.stringify(data.value);
-      return null; // no row for this key yet — not an error, just "nothing saved"
+      return null;
     }catch(e){
       console.warn('Supabase storageGet failed, falling back:', key, e);
     }
@@ -196,7 +181,7 @@ async function storageSet(key, value){
   if(supabaseClient){
     try{
       let parsed;
-      try{ parsed = JSON.parse(value); }catch(e){ parsed = value; } // store as real JSON when possible
+      try{ parsed = JSON.parse(value); }catch(e){ parsed = value; }
       const { error } = await supabaseClient.from('kv_store').upsert({ key, value: parsed, updated_at: new Date().toISOString() });
       if(error) throw error;
       return;
@@ -303,6 +288,15 @@ async function addTrip(name){
 async function deleteTrip(tripId){
   state.trips = state.trips.filter(t=>t.id!==tripId);
   Object.keys(state.tripOf).forEach(k=>{ if(state.tripOf[k]===tripId) delete state.tripOf[k]; });
+  render();
+  await persistTrips();
+}
+async function renameTrip(tripId, newName){
+  newName = (newName||'').trim();
+  if(!newName) return;
+  const trip = state.trips.find(t=>t.id===tripId);
+  if(!trip) return;
+  trip.name = newName;
   render();
   await persistTrips();
 }
@@ -434,7 +428,6 @@ async function importDataFromFile(file){
   if(payload.txCategoryOverride) state.txCategoryOverride = payload.txCategoryOverride;
   if(payload.txCache) mergeIntoCache(payload.txCache); // dedup-merge, doesn't wipe what's already cached here
   if(payload.trips){
-    // merge by id, don't wipe trips already created in this session
     const known = new Set(state.trips.map(t=>t.id));
     payload.trips.forEach(t=>{ if(!known.has(t.id)){ state.trips.push(t); known.add(t.id); } });
   }
@@ -746,9 +739,9 @@ function connectPanel(){
   p.querySelector('#rememberChk').addEventListener('change', async e=>{
     state.rememberToken = e.target.checked;
     if(state.rememberToken && state.token.trim()){
-      await storageSet('ms_token', state.token.trim()); // save right away, don't wait for the next connect
+      await storageSet('ms_token', state.token.trim());
     }else if(!state.rememberToken){
-      await storageSet('ms_token', ''); // she unchecked it — clear whatever was saved, don't leave a stale token behind
+      await storageSet('ms_token', '');
     }
   });
   p.querySelector('#connectBtn').addEventListener('click', handleConnect);
@@ -1511,7 +1504,7 @@ function buildTripsPanel(all){
   p.className = 'ms-panel ms-trips-panel';
   p.innerHTML = `
     <h2>🧳 Подорожі — окремий облік витрат по поїздках</h2>
-    <p class="ms-hint">Створи поїздку, тоді розгорни її і постав галочки на операціях, які до неї відносяться (квитки, житло, покупки під час подорожі — будь-що). Список тепер охоплює <b>всю історію, яка коли-небудь завантажувалась</b> (весь кеш), а не лише поточний період — тож можна позначати операції з минулих місяців. Сума порахується сама, скільки б людей у списку не було.</p>
+    <p class="ms-hint">Створи поїздку тут, а сам зв'язок з операціями роби у колонці «Поїздка» в таблиці «Всі операції» вище — обери там потрібну поїздку у випадаючому списку конкретної покупки. Тут — тільки підсумок по кожній поїздці.</p>
     <div class="ms-manual-form">
       <div class="ms-field" style="flex:2"><label>Назва поїздки</label><input type="text" id="tripName" placeholder="Наприклад: Польща, липень"></div>
       <button class="ms-btn" id="tripAdd" style="align-self:flex-end">Створити поїздку</button>
@@ -1527,6 +1520,15 @@ function buildTripsPanel(all){
     const sum = txs.reduce((s,t)=>s+Math.abs(t.amount),0);
     const expanded = !!state.expandedTrips?.[trip.id];
 
+    let dateRangeStr = '';
+    if(txs.length){
+      const dates = txs.map(t=>t.date.getTime());
+      const minD = new Date(Math.min(...dates));
+      const maxD = new Date(Math.max(...dates));
+      const fmtD = d=>d.toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'});
+      dateRangeStr = minD.toDateString()===maxD.toDateString() ? fmtD(minD) : `${fmtD(minD)} – ${fmtD(maxD)}`;
+    }
+
     const card = document.createElement('div');
     card.className = 'ms-trip-card';
 
@@ -1535,6 +1537,7 @@ function buildTripsPanel(all){
     head.innerHTML = `
       <span class="ms-trip-chevron">${expanded?'▾':'▸'}</span>
       <span class="ms-trip-name">${escapeHtml(trip.name)}</span>
+      ${dateRangeStr ? `<span class="ms-trip-meta">${dateRangeStr}</span>` : ''}
       <span class="ms-trip-meta">${txs.length} оп.</span>
       <span class="ms-trip-sum">${fmt(sum)} ${curSym()}</span>
     `;
@@ -1544,6 +1547,14 @@ function buildTripsPanel(all){
       state.expandedTrips[trip.id] = !expanded;
       render();
     });
+    const renameBtn = document.createElement('button');
+    renameBtn.className = 'ms-btn secondary';
+    renameBtn.textContent = 'Перейменувати';
+    renameBtn.addEventListener('click', ()=>{
+      const newName = prompt('Нова назва поїздки:', trip.name);
+      renameTrip(trip.id, newName);
+    });
+    head.appendChild(renameBtn);
     const delBtn = document.createElement('button');
     delBtn.className = 'ms-btn secondary';
     delBtn.textContent = 'Видалити поїздку';
@@ -1554,38 +1565,24 @@ function buildTripsPanel(all){
     card.appendChild(head);
 
     if(expanded){
-      const pickWrap = document.createElement('div');
-      pickWrap.className = 'ms-trip-pick';
-      const picked = all.filter(t=>state.tripOf[txKey(t)]===trip.id);
-      const unpicked = all.filter(t=>state.tripOf[txKey(t)]!==trip.id);
-      const ordered = [...picked, ...unpicked].sort((a,b)=>b.date-a.date);
-
-      pickWrap.innerHTML = `<p class="ms-hint" style="margin:10px 0">Постав галочку на все, що відноситься до цієї поїздки:</p>`;
-      const scrollBox = document.createElement('div');
-      scrollBox.className = 'ms-trip-scroll';
-      ordered.forEach(t=>{
-        const key = txKey(t);
-        const isThisTrip = state.tripOf[key]===trip.id;
-        const row = document.createElement('label');
-        row.className = 'ms-trip-pick-row';
-        const chk = document.createElement('input');
-        chk.type = 'checkbox';
-        chk.checked = isThisTrip;
-        chk.addEventListener('change', e=>{ assignTrip(key, e.target.checked ? trip.id : ''); });
-        const dateStr = t.date.toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'});
-        row.appendChild(chk);
-        const span = document.createElement('span');
-        span.className = 'ms-trip-pick-desc';
-        span.textContent = `${dateStr} · ${t.desc}`;
-        const amtSpan = document.createElement('span');
-        amtSpan.className = 'ms-trip-pick-amt';
-        amtSpan.textContent = `${fmt(Math.abs(t.amount))} ${curSym()}`;
-        row.appendChild(span);
-        row.appendChild(amtSpan);
-        scrollBox.appendChild(row);
-      });
-      pickWrap.appendChild(scrollBox);
-      card.appendChild(pickWrap);
+      const detailWrap = document.createElement('div');
+      detailWrap.className = 'ms-trip-pick';
+      if(txs.length===0){
+        detailWrap.innerHTML = '<p class="ms-hint" style="margin:10px 0">Ще нічого не прив\'язано — познач операції в «Всі операції» вище.</p>';
+      }else{
+        detailWrap.innerHTML = `<p class="ms-hint" style="margin:10px 0">Прив'язані операції (щоб прибрати одну — онови її поїздку на «—» в «Всі операції»):</p>`;
+        const scrollBox = document.createElement('div');
+        scrollBox.className = 'ms-trip-scroll';
+        [...txs].sort((a,b)=>b.date-a.date).forEach(t=>{
+          const dateStr = t.date.toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'});
+          const row = document.createElement('div');
+          row.className = 'ms-trip-pick-row';
+          row.innerHTML = `<span class="ms-trip-pick-desc">${dateStr} · ${escapeHtml(t.desc)}</span><span class="ms-trip-pick-amt">${fmt(Math.abs(t.amount))} ${curSym()}</span>`;
+          scrollBox.appendChild(row);
+        });
+        detailWrap.appendChild(scrollBox);
+      }
+      card.appendChild(detailWrap);
     }
 
     list.appendChild(card);
