@@ -1,4 +1,3 @@
-
 (function(){
   try{
   
@@ -93,6 +92,22 @@
     return categorize(t.desc, t.mcc, t.amount, state.overrides, state.rules);
   }
   
+  // Groups her fine-grained categories into the 4 buckets that actually matter when
+  // looking back at a trip: where did the money go — housing, getting around, food, or
+  // everything else (souvenirs, beauty, entertainment, etc.)
+  function tripGroupFor(cat){
+    const housing = ['Путешествия - жилье'];
+    const transport = ['такси','транспорт','Путешествия транспорт: самолёт','Путешествия транспорт: кава в літаку',
+      'Путешествия транспорт: поезд','Путешествия транспорт: автобус','Путешествия транспорт: інше','авто','бензин'];
+    const food = ['продукти','продукти спільні','обеды'];
+    if(housing.includes(cat)) return 'Житло';
+    if(transport.includes(cat)) return 'Транспорт';
+    if(food.includes(cat)) return 'Їжа';
+    return 'Інше';
+  }
+  const TRIP_GROUP_ORDER = ['Житло','Транспорт','Їжа','Інше'];
+  const TRIP_GROUP_ICONS = {'Житло':'🏠','Транспорт':'🚌','Їжа':'🍽️','Інше':'🛍️'};
+  
   // Shared handler for the category <select> wherever it appears. Asks whether the change
   // should apply only to this one purchase or to every purchase from that merchant — because
   // by default a category change is merchant-wide, which surprised her when one supermarket
@@ -165,10 +180,35 @@
   // opening the page. It stays purely local (window.storage/localStorage), same as before.
   const LOCAL_ONLY_KEYS = new Set(['ms_token']);
   
+  let authUserId = null; // set once she's logged in via Supabase Auth; every kv_store row is scoped to this
+  
+  async function initAuth(){
+    if(!supabaseClient) return null;
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    authUserId = session?.user?.id || null;
+    return authUserId;
+  }
+  async function signIn(email, password){
+    const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+    if(error) return { error };
+    authUserId = data.user.id;
+    return { user: data.user };
+  }
+  async function signUp(email, password){
+    const { data, error } = await supabaseClient.auth.signUp({ email, password });
+    if(error) return { error };
+    authUserId = data.user?.id || null;
+    return { user: data.user };
+  }
+  async function signOutAuth(){
+    await supabaseClient.auth.signOut();
+    authUserId = null;
+  }
+  
   async function storageGet(key){
-    if(supabaseClient && !LOCAL_ONLY_KEYS.has(key)){
+    if(supabaseClient && !LOCAL_ONLY_KEYS.has(key) && authUserId){
       try{
-        const { data, error } = await supabaseClient.from('kv_store').select('value').eq('key', key).maybeSingle();
+        const { data, error } = await supabaseClient.from('kv_store').select('value').eq('key', key).eq('user_id', authUserId).maybeSingle();
         if(error) throw error;
         if(data) return typeof data.value === 'string' ? data.value : JSON.stringify(data.value);
         return null;
@@ -184,11 +224,11 @@
     }
   }
   async function storageSet(key, value){
-    if(supabaseClient && !LOCAL_ONLY_KEYS.has(key)){
+    if(supabaseClient && !LOCAL_ONLY_KEYS.has(key) && authUserId){
       try{
         let parsed;
         try{ parsed = JSON.parse(value); }catch(e){ parsed = value; }
-        const { error } = await supabaseClient.from('kv_store').upsert({ key, value: parsed, updated_at: new Date().toISOString() });
+        const { error } = await supabaseClient.from('kv_store').upsert({ key, value: parsed, user_id: authUserId, updated_at: new Date().toISOString() }, { onConflict: 'key,user_id' });
         if(error) throw error;
         return;
       }catch(e){
@@ -711,10 +751,14 @@
     const inner = document.createElement('div');
     inner.className = 'ms-inner';
     inner.appendChild(header());
-    if(state.step==='connect') inner.appendChild(connectPanel());
-    if(state.step==='accounts') inner.appendChild(accountsPanel());
-    if(state.step==='results'){
-      inner.appendChild(resultsPanel());
+    if(!authUserId){
+      inner.appendChild(authPanel());
+    }else{
+      if(state.step==='connect') inner.appendChild(connectPanel());
+      if(state.step==='accounts') inner.appendChild(accountsPanel());
+      if(state.step==='results'){
+        inner.appendChild(resultsPanel());
+      }
     }
     const footer = document.createElement('div');
     footer.className='ms-footer-note';
@@ -723,13 +767,47 @@
     app.appendChild(inner);
   }
   
+  function authPanel(){
+    const p = document.createElement('div');
+    p.className = 'ms-panel';
+    p.innerHTML = `
+      <h2>Вхід</h2>
+      <p class="ms-hint">Дані тепер прив'язані до твого акаунту — без входу їх ніхто (навіть ти з іншого пристрою без входу) не побачить.</p>
+      <div class="ms-row">
+        <div class="ms-field"><label>Email</label><input type="email" id="authEmail" placeholder="you@example.com"></div>
+        <div class="ms-field"><label>Пароль</label><input type="password" id="authPassword" placeholder="••••••••"></div>
+      </div>
+      <div class="ms-row" style="margin-top:10px">
+        <button class="ms-btn" id="authSignInBtn">Увійти</button>
+        <button class="ms-btn secondary" id="authSignUpBtn">Створити акаунт (перший раз)</button>
+      </div>
+      ${state.authError ? `<div class="ms-error">${escapeHtml(state.authError)}</div>` : ''}
+    `;
+    const doAuth = async (fn)=>{
+      const email = p.querySelector('#authEmail').value.trim();
+      const password = p.querySelector('#authPassword').value;
+      if(!email || !password){ state.authError = 'Впиши email і пароль.'; render(); return; }
+      const { error } = await fn(email, password);
+      if(error){ state.authError = error.message; render(); return; }
+      state.authError = null;
+      await loadPersisted();
+      render();
+    };
+    p.querySelector('#authSignInBtn').addEventListener('click', ()=>doAuth(signIn));
+    p.querySelector('#authSignUpBtn').addEventListener('click', ()=>doAuth(signUp));
+    return p;
+  }
+  
   function header(){
     const div = document.createElement('div');
     div.innerHTML = `
       <p class="ms-eyebrow">MonoStat · автостатистика</p>
       <h1 class="ms-h1">Витрати по картці, розкладені по категоріях</h1>
       <p class="ms-sub">Підключись особистим токеном Monobank, вибери період — і отримаєш ту саму розкладку, яку раніше вела вручну в MoneyOK.</p>
+      ${authUserId ? `<button class="ms-btn secondary" id="signOutBtn" style="margin-top:8px">Вийти з акаунту</button>` : ''}
     `;
+    const signOutBtn = div.querySelector('#signOutBtn');
+    if(signOutBtn) signOutBtn.addEventListener('click', async ()=>{ await signOutAuth(); render(); });
     return div;
   }
   
@@ -1073,7 +1151,10 @@
     const panel2 = document.createElement('div');
     panel2.className='ms-panel';
     panel2.innerHTML = `<h2>Всі операції</h2><p class="ms-hint">Категорію можна змінити прямо тут — вибір запам'ятається для цього мерчанта надалі. Іконкою 📝 можна додати нотатку до конкретної покупки — що це було насправді. У колонці «Поїздка» можна прив'язати трату до конкретної подорожі (створюються нижче, в «Подорожі»). Галочка «чисто» — познач, якщо це насправді не витрата (повернули гроші, поповнення фонду тощо) — вплине на «Чисті трати» нижче.</p>
-      <div style="font-size:13px;color:var(--muted);margin-bottom:12px">Разом витрачено: <b style="color:var(--gold);font-family:var(--font-mono)">${fmt(total)} ${curSym()}</b>${fmtEur(total, curCode())} · ${all.length} операцій</div>
+      <div class="ms-field" style="margin-bottom:10px">
+        <input type="text" id="txSearchInput" placeholder="Пошук за описом або власною нотаткою…" value="${escapeHtml(state.txSearchQuery||'')}">
+      </div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:12px" id="txSearchSummary">Разом витрачено: <b style="color:var(--gold);font-family:var(--font-mono)">${fmt(total)} ${curSym()}</b>${fmtEur(total, curCode())} · ${all.length} операцій</div>
       <div class="ms-table-wrap"><table class="ms-tx"><thead><tr><th>Дата</th><th>Опис</th><th>Категорія</th><th>Поїздка</th><th title="Не витрата">Чисто</th><th style="text-align:right">Сума</th></tr></thead><tbody id="txBody"></tbody></table></div>`;
     const tbody = panel2.querySelector('#txBody');
     all.sort((a,b)=>b.date-a.date).forEach(t=>{
@@ -1081,6 +1162,7 @@
       const dateStr = t.date.toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'});
       const key = txKey(t);
       const existingNote = state.notes[key];
+      tr.dataset.search = (t.desc+' '+(existingNote||'')).toLowerCase();
       const isNotExpense = !!state.notExpense[key];
       if(isNotExpense) tr.style.opacity = '.45';
   
@@ -1155,6 +1237,7 @@
   
     const TX_PREVIEW_COUNT = 8;
     const txRows = [...tbody.children];
+    let txToggleBtn = null;
     if(txRows.length > TX_PREVIEW_COUNT && !state.expandedBlocks.transactions){
       txRows.slice(TX_PREVIEW_COUNT).forEach(r=>r.style.display='none');
       const moreBtn = document.createElement('button');
@@ -1164,6 +1247,7 @@
       moreBtn.textContent = `Показати ще ${txRows.length - TX_PREVIEW_COUNT} ▾`;
       moreBtn.addEventListener('click', ()=>{ state.expandedBlocks.transactions = true; render(); });
       panel2.appendChild(moreBtn);
+      txToggleBtn = moreBtn;
     }else if(txRows.length > TX_PREVIEW_COUNT){
       const lessBtn = document.createElement('button');
       lessBtn.className = 'ms-btn secondary';
@@ -1172,7 +1256,31 @@
       lessBtn.textContent = 'Згорнути ▴';
       lessBtn.addEventListener('click', ()=>{ state.expandedBlocks.transactions = false; render(); });
       panel2.appendChild(lessBtn);
+      txToggleBtn = lessBtn;
     }
+  
+    // Search filters rows directly in the DOM (no render()) so the input never loses
+    // focus mid-typing — it also searches her own notes, not just the merchant text.
+    const txSearchInput = panel2.querySelector('#txSearchInput');
+    const txSearchSummary = panel2.querySelector('#txSearchSummary');
+    txSearchInput.addEventListener('input', e=>{
+      const q = e.target.value.trim().toLowerCase();
+      state.txSearchQuery = e.target.value; // remembered for display only, doesn't trigger render
+      if(!q){
+        txRows.forEach((r,i)=>{ r.style.display = (i<TX_PREVIEW_COUNT || state.expandedBlocks.transactions) ? '' : 'none'; });
+        if(txToggleBtn) txToggleBtn.style.display = '';
+        txSearchSummary.innerHTML = `Разом витрачено: <b style="color:var(--gold);font-family:var(--font-mono)">${fmt(total)} ${curSym()}</b>${fmtEur(total, curCode())} · ${all.length} операцій`;
+        return;
+      }
+      let matchCount = 0;
+      txRows.forEach(r=>{
+        const match = r.dataset.search.includes(q);
+        r.style.display = match ? '' : 'none';
+        if(match) matchCount++;
+      });
+      if(txToggleBtn) txToggleBtn.style.display = 'none';
+      txSearchSummary.innerHTML = `Знайдено: <b style="color:var(--gold);font-family:var(--font-mono)">${matchCount}</b> з ${all.length} операцій`;
+    });
   
     const panel3 = document.createElement('div');
     panel3.className='ms-panel';
@@ -1622,15 +1730,31 @@
         if(txs.length===0){
           detailWrap.innerHTML = '<p class="ms-hint" style="margin:10px 0">Ще нічого не прив\'язано — познач операції в «Всі операції» вище.</p>';
         }else{
-          detailWrap.innerHTML = `<p class="ms-hint" style="margin:10px 0">Прив'язані операції (щоб прибрати одну — онови її поїздку на «—» в «Всі операції»):</p>`;
+          detailWrap.innerHTML = `<p class="ms-hint" style="margin:10px 0">Згруповано за типом витрати (щоб прибрати операцію — онови її поїздку на «—» в «Всі операції»):</p>`;
+          const byGroup = {};
+          txs.forEach(t=>{
+            const g = tripGroupFor(t.cat);
+            (byGroup[g] = byGroup[g]||[]).push(t);
+          });
           const scrollBox = document.createElement('div');
           scrollBox.className = 'ms-trip-scroll';
-          [...txs].sort((a,b)=>b.date-a.date).forEach(t=>{
-            const dateStr = t.date.toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'});
-            const row = document.createElement('div');
-            row.className = 'ms-trip-pick-row';
-            row.innerHTML = `<span class="ms-trip-pick-desc">${dateStr} · ${escapeHtml(t.desc)}</span><span class="ms-trip-pick-amt">${fmt(Math.abs(t.amount))} ${curSym()}</span>`;
-            scrollBox.appendChild(row);
+          TRIP_GROUP_ORDER.filter(g=>byGroup[g]).forEach(g=>{
+            const groupTxs = byGroup[g].sort((a,b)=>b.date-a.date);
+            const groupSum = groupTxs.reduce((s,t)=>s+Math.abs(t.amount),0);
+            const groupHead = document.createElement('div');
+            groupHead.className = 'ms-trip-pick-row';
+            groupHead.style.fontWeight = '600';
+            groupHead.style.background = 'var(--panel-hi)';
+            groupHead.innerHTML = `<span class="ms-trip-pick-desc">${TRIP_GROUP_ICONS[g]} ${g}</span><span class="ms-trip-pick-amt">${fmt(groupSum)} ${curSym()}</span>`;
+            scrollBox.appendChild(groupHead);
+            groupTxs.forEach(t=>{
+              const dateStr = t.date.toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'});
+              const row = document.createElement('div');
+              row.className = 'ms-trip-pick-row';
+              row.style.paddingLeft = '20px';
+              row.innerHTML = `<span class="ms-trip-pick-desc">${dateStr} · ${escapeHtml(t.desc)}</span><span class="ms-trip-pick-amt">${fmt(Math.abs(t.amount))} ${curSym()}</span>`;
+              scrollBox.appendChild(row);
+            });
           });
           detailWrap.appendChild(scrollBox);
         }
@@ -1843,11 +1967,14 @@
   
   // ---------- init ----------
   window.MonoStatDefaults.DEFAULT_CUSTOM_CATS.forEach(c=>applyCustomCategory(c, true));
-  loadPersisted().then(()=>{
-    state.from = defaultPeriodStart(); // her budgeting month runs from the 10th (payday) to the 10th
-    state.to = todayStr();
-    state.initialLoading = false;
-    render();
+  initAuth().then(()=>{
+    if(!authUserId){ state.initialLoading = false; render(); return; }
+    return loadPersisted().then(()=>{
+      state.from = defaultPeriodStart(); // her budgeting month runs from the 10th (payday) to the 10th
+      state.to = todayStr();
+      state.initialLoading = false;
+      render();
+    });
   }).catch(err=>{
     document.getElementById('app').innerHTML = '<div style="color:#E3AA9C;font-family:monospace;padding:20px;white-space:pre-wrap">Помилка ініціалізації: '+(err&&err.message)+'</div>';
   });
@@ -1859,4 +1986,3 @@
     else console.error(err);
   }
   })();
-  
