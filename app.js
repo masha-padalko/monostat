@@ -791,6 +791,8 @@
       if(error){ state.authError = error.message; render(); return; }
       state.authError = null;
       await loadPersisted();
+      if(!state.from) state.from = defaultPeriodStart(); // was missing — caused NaN/NaN in the statement URL
+      if(!state.to) state.to = todayStr();
       render();
     };
     p.querySelector('#authSignInBtn').addEventListener('click', ()=>doAuth(signIn));
