@@ -42,6 +42,7 @@ export let state = {
   jarDraftStartDate: null, // transient — whatever she's currently picked in the date field, before clicking (Re)start
   jarStartDateActual: null, // when THIS tracking run actually began — fixed, unlike jarLastDate which advances to today once caught up
   jarAutoCheckedThisLoad: false, // ensures the background jar catch-up only runs once per page load, never re-fires mid-interaction
+  editingTripDates: null, // tripId whose inline date-picker form is currently open, or null
   useCache: true, // whether to merge cached historical periods in alongside the freshly fetched range
   viewTab: 'current', // 'current' | 'previous' — which period tab is showing in the results view
   trips: [],          // [{id, name}] — named trips she can tag transactions with

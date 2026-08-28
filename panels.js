@@ -982,13 +982,8 @@ export function buildTripsPanel(all){
     datesBtn.textContent = '📅';
     datesBtn.title = 'Задати дати поїздки вручну';
     datesBtn.addEventListener('click', ()=>{
-      const defFrom = trip.dateFrom || todayStr();
-      const defTo = trip.dateTo || todayStr();
-      const from = prompt('Дата початку поїздки (РРРР-ММ-ДД):', defFrom);
-      if(from===null) return;
-      const to = prompt('Дата кінця поїздки (РРРР-ММ-ДД):', defTo);
-      if(to===null) return;
-      setTripDates(trip.id, from.trim(), to.trim());
+      state.editingTripDates = state.editingTripDates===trip.id ? null : trip.id;
+      render();
     });
     head.appendChild(datesBtn);
     const delBtn = document.createElement('button');
@@ -1000,6 +995,35 @@ export function buildTripsPanel(all){
     });
     head.appendChild(delBtn);
     card.appendChild(head);
+
+    if(state.editingTripDates===trip.id){
+      const dateForm = document.createElement('div');
+      dateForm.className = 'ms-row';
+      dateForm.style.cssText = 'margin:10px 0;align-items:flex-end;gap:10px;flex-wrap:wrap';
+      dateForm.innerHTML = `
+        <div class="ms-field" style="max-width:170px">
+          <label>Початок поїздки</label>
+          <input type="date" id="tripDateFromInput" value="${trip.dateFrom || todayStr()}">
+        </div>
+        <div class="ms-field" style="max-width:170px">
+          <label>Кінець поїздки</label>
+          <input type="date" id="tripDateToInput" value="${trip.dateTo || todayStr()}">
+        </div>
+        <button class="ms-btn" id="tripDateSaveBtn">Зберегти</button>
+        <button class="ms-btn secondary" id="tripDateCancelBtn">Скасувати</button>
+      `;
+      dateForm.querySelector('#tripDateSaveBtn').addEventListener('click', ()=>{
+        const from = dateForm.querySelector('#tripDateFromInput').value;
+        const to = dateForm.querySelector('#tripDateToInput').value;
+        state.editingTripDates = null;
+        setTripDates(trip.id, from, to);
+      });
+      dateForm.querySelector('#tripDateCancelBtn').addEventListener('click', ()=>{
+        state.editingTripDates = null;
+        render();
+      });
+      card.appendChild(dateForm);
+    }
 
     if(expanded){
       const detailWrap = document.createElement('div');
