@@ -4,28 +4,46 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>MonoStat — особиста статистика Monobank</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext x='50' y='72' font-size='72' text-anchor='middle'%3E%F0%9F%92%B8%3C/text%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%92%B8%3C/text%3E%3C/svg%3E">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <!--
-    MonoStat — персональний фінансовий трекер на базі Monobank Open API.
-    Файлова структура проєкту:
-      index.html   — цей файл, лише розмітка та підключення style.css / data.js / app.js
-      style.css    — всі стилі та кольорові токени
-      data.js      — "запечені" дефолти: її власні правила категоризації, нотатки,
-                     кастомні категорії та кеш операцій, накопичені за час використання.
-                     Завантажується ПЕРШИМ, до app.js, бо app.js читає ці константи
-                     при ініціалізації стану.
-      app.js       — вся логіка застосунку: підключення до API, категоризація,
-                     рендеринг усіх панелей, зберігання даних.
-    Працює без білд-кроку — просто відкрити index.html у браузері
-    (або "Додати на екран Домой" як PWA).
+    MonoStat — персональний фінансовий трекер на базі Monobank Open API + Supabase.
+    Файлова структура (розбито на ES-модулі, без білд-кроку — просто <script type="module">):
+      index.html     — статична шапка/підвал, підключення style.css / data.js / app.js
+      style.css      — стилі
+      data.js        — запечені дефолти (зараз порожні — реальні дані в Supabase)
+      state.js       — стан застосунку (state) + список категорій (CATS)
+      categorize.js  — категоризація транзакцій, кастомні категорії
+      utils.js       — форматування, дати, валюти, дрібні хелпери
+      auth.js        — Supabase Auth: вхід/реєстрація/скидання пароля
+      storage.js     — storageGet/storageSet (Supabase kv_store + локальний фолбек)
+      persistence.js — завантаження/збереження всіх даних, експорт/імпорт JSON
+      monobank-api.js — підключення до api.monobank.ua, обробка виписки
+      trips.js       — CRUD поїздок
+      debts.js       — облік боргів
+      panels.js       — рендеринг усіх панелей інтерфейсу (найбільший файл — це UI-шар)
+      app.js         — лише ініціалізація, імпортує все інше
+
+    Шапка й підвал — статичний HTML нижче, ніколи не перебудовується. render() у
+    panels.js чіпає лише #app (динамічний вміст, залежний від стану).
   -->
-  <div class="ms-root" id="app"></div>
+  <div class="ms-root">
+    <div class="ms-inner">
+      <p class="ms-eyebrow">MonoStat · автостатистика</p>
+      <h1 class="ms-h1">Витрати по картці, розкладені по категоріях</h1>
+      <p class="ms-sub">Підключись особистим токеном Monobank, вибери період — і отримаєш ту саму розкладку, яку раніше вела вручну в MoneyOK.</p>
+      <div id="ms-signout-slot"></div>
+
+      <div id="app"></div>
+
+      <div class="ms-footer-note">Дані завантажуються напряму з api.monobank.ua у твоєму браузері й нікуди більше не надсилаються. Категорії, які ти виправляєш, і ручні записи зберігаються окремо від токена.</div>
+    </div>
+  </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="data.js"></script>
-  <script src="app.js"></script>
+  <script type="module" src="app.js"></script>
 </body>
 </html>
