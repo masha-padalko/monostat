@@ -12,7 +12,9 @@ import { buildConicGradient, curCode, curSym, daysAgoStr, daysUntilPeriodEnd, de
 export function render(){
   const app = document.getElementById('app');
   app.innerHTML = '';
-  if(!authUserId){
+  if(state.authChecking){
+    app.appendChild(authCheckingPanel());
+  }else if(!authUserId){
     app.appendChild(authPanel());
   }else{
     if(state.step==='connect') app.appendChild(connectPanel());
@@ -22,6 +24,13 @@ export function render(){
     }
   }
   updateSignOutSlot();
+}
+
+export function authCheckingPanel(){
+  const p = document.createElement('div');
+  p.className = 'ms-panel';
+  p.innerHTML = `<p class="ms-hint"><span class="ms-spin"></span> Перевіряю вхід…</p>`;
+  return p;
 }
 
 export function authPanel(){
@@ -343,19 +352,46 @@ export function resultsPanel(){
 
   // trip spend for THIS period only (not all-time) — she can already see full-trip
   // totals in "Подорожі", this is specifically "how much of THIS period was travel"
+  const CURRENCY_FLAGS = {
+    980:'🇺🇦', 978:'🇪🇺', 840:'🇺🇸', 985:'🇵🇱', 946:'🇷🇴', 981:'🇬🇪', 498:'🇲🇩',
+    949:'🇹🇷', 826:'🇬🇧', 203:'🇨🇿', 348:'🇭🇺', 752:'🇸🇪', 578:'🇳🇴', 208:'🇩🇰', 756:'🇨🇭'
+  };
   const tripSpendByTrip = {};
+  const tripCurrencyCounts = {};
   all.forEach(t=>{
     const tid = state.tripOf[txKey(t)];
-    if(tid) tripSpendByTrip[tid] = (tripSpendByTrip[tid]||0) + Math.abs(t.amount);
+    if(!tid) return;
+    tripSpendByTrip[tid] = (tripSpendByTrip[tid]||0) + Math.abs(t.amount);
+    if(t.currency && t.currency!==980){
+      tripCurrencyCounts[tid] = tripCurrencyCounts[tid] || {};
+      tripCurrencyCounts[tid][t.currency] = (tripCurrencyCounts[tid][t.currency]||0) + 1;
+    }
   });
   const tripEntries = Object.entries(tripSpendByTrip)
-    .map(([tid,sum])=>({name: state.trips.find(t=>t.id===tid)?.name || '?', sum}))
+    .map(([tid,sum])=>{
+      const counts = tripCurrencyCounts[tid];
+      const dominantCurrency = counts ? Object.entries(counts).sort((a,b)=>b[1]-a[1])[0][0] : 980;
+      return {
+        name: state.trips.find(t=>t.id===tid)?.name || '?',
+        sum,
+        flag: CURRENCY_FLAGS[dominantCurrency] || '🧳'
+      };
+    })
     .sort((a,b)=>b.sum-a.sum);
   const tripPeriodTotal = tripEntries.reduce((s,e)=>s+e.sum,0);
 
   panel1.innerHTML = `
     <h2>Загальна картина</h2>
-    ${tripPeriodTotal>0 ? `<div class="ms-hint" style="margin-bottom:8px">🧳 Поїздки за цей період: <b style="color:var(--text)">${fmt(tripPeriodTotal)} ${curSym()}</b>${fmtEur(tripPeriodTotal, curCode())}${tripEntries.length>1 ? ' — '+tripEntries.map(e=>`${escapeHtml(e.name)}: ${fmt(e.sum)} ${curSym()}`).join(', ') : ''}</div>` : ''}
+    ${tripPeriodTotal>0 ? `
+    <div class="ms-trip-period-summary">
+      <div class="ms-hint" style="margin-bottom:6px">🧳 Поїздки за цей період</div>
+      ${tripEntries.map(e=>`
+        <div class="ms-trip-period-row">
+          <span class="ms-trip-period-name">${e.flag} ${escapeHtml(e.name)}</span>
+          <span class="ms-trip-period-amt">${fmt(e.sum)} ${curSym()}<span class="ms-trip-period-eur">${fmtEur(e.sum, curCode())}</span></span>
+        </div>
+      `).join('')}
+    </div>` : ''}
     <div class="ms-hero">
       <div class="ms-donut-wrap">
         <div class="ms-donut" style="background:conic-gradient(${donutGradient})"></div>

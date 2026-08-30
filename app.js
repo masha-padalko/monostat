@@ -9,6 +9,7 @@ import { defaultPeriodStart, todayStr } from './utils.js';
 // ---------- init ----------
 window.MonoStatDefaults.DEFAULT_CUSTOM_CATS.forEach(c=>applyCustomCategory(c, true));
 initAuth().then(()=>{
+  state.authChecking = false;
   if(!authUserId){ state.initialLoading = false; render(); return; }
   return loadPersisted().then(()=>{
     state.from = defaultPeriodStart(); // her budgeting month runs from the 10th (payday) to the 10th

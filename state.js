@@ -43,6 +43,7 @@ export let state = {
   jarStartDateActual: null, // when THIS tracking run actually began — fixed, unlike jarLastDate which advances to today once caught up
   jarAutoCheckedThisLoad: false, // ensures the background jar catch-up only runs once per page load, never re-fires mid-interaction
   editingTripDates: null, // tripId whose inline date-picker form is currently open, or null
+  authChecking: true, // true only during the very first initAuth() check — avoids flashing the login form before we know a session already exists
   useCache: true, // whether to merge cached historical periods in alongside the freshly fetched range
   viewTab: 'current', // 'current' | 'previous' — which period tab is showing in the results view
   trips: [],          // [{id, name}] — named trips she can tag transactions with
