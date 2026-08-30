@@ -357,24 +357,28 @@ export function resultsPanel(){
     949:'🇹🇷', 826:'🇬🇧', 203:'🇨🇿', 348:'🇭🇺', 752:'🇸🇪', 578:'🇳🇴', 208:'🇩🇰', 756:'🇨🇭'
   };
   const tripSpendByTrip = {};
-  const tripCurrencyCounts = {};
+  const tripCurrencySpend = {};
   all.forEach(t=>{
     const tid = state.tripOf[txKey(t)];
     if(!tid) return;
     tripSpendByTrip[tid] = (tripSpendByTrip[tid]||0) + Math.abs(t.amount);
     if(t.currency && t.currency!==980){
-      tripCurrencyCounts[tid] = tripCurrencyCounts[tid] || {};
-      tripCurrencyCounts[tid][t.currency] = (tripCurrencyCounts[tid][t.currency]||0) + 1;
+      tripCurrencySpend[tid] = tripCurrencySpend[tid] || {};
+      tripCurrencySpend[tid][t.currency] = (tripCurrencySpend[tid][t.currency]||0) + Math.abs(t.amount);
     }
   });
   const tripEntries = Object.entries(tripSpendByTrip)
     .map(([tid,sum])=>{
-      const counts = tripCurrencyCounts[tid];
-      const dominantCurrency = counts ? Object.entries(counts).sort((a,b)=>b[1]-a[1])[0][0] : 980;
+      const currencySpend = tripCurrencySpend[tid];
+      // every distinct foreign currency actually spent in, not just the biggest one —
+      // a trip through several countries should show all their flags, not one "winner"
+      const flags = currencySpend
+        ? Object.entries(currencySpend).sort((a,b)=>b[1]-a[1]).map(([cur])=>CURRENCY_FLAGS[cur]).filter(Boolean)
+        : ['🧳'];
       return {
         name: state.trips.find(t=>t.id===tid)?.name || '?',
         sum,
-        flag: CURRENCY_FLAGS[dominantCurrency] || '🧳'
+        flags: [...new Set(flags)].join(' ')
       };
     })
     .sort((a,b)=>b.sum-a.sum);
@@ -387,7 +391,7 @@ export function resultsPanel(){
       <div class="ms-hint" style="margin-bottom:6px">🧳 Поїздки за цей період</div>
       ${tripEntries.map(e=>`
         <div class="ms-trip-period-row">
-          <span class="ms-trip-period-name">${e.flag} ${escapeHtml(e.name)}</span>
+          <span class="ms-trip-period-name">${e.flags} ${escapeHtml(e.name)}</span>
           <span class="ms-trip-period-amt">${fmt(e.sum)} ${curSym()}<span class="ms-trip-period-eur">${fmtEur(e.sum, curCode())}</span></span>
         </div>
       `).join('')}
