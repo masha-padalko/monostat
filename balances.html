@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Мої баланси</title>
+  <link rel="stylesheet" href="balances.css">
+</head>
+<body>
+<div class="ms-root">
+  <div class="ms-inner">
+    <div class="ms-header">
+      <h1>Мої баланси</h1>
+      <a href="index.html" class="ms-back-link">← До MonoStat</a>
+    </div>
+
+    <div class="ms-panel">
+      <p class="ms-hint">
+        Усе, що тут вписуєш, лишається <b style="color:var(--text)">тільки в цьому браузері</b> —
+        жодних запитів нікуди не йде, ніяка Supabase чи Monobank API тут не задіяні.
+        Найпростіший і найбезпечніший спосіб тримати приватний підсумок «скільки всього є»,
+        не спокушаючи нікого зайвим доступом до реальних рахунків.
+      </p>
+    </div>
+
+    <div class="ms-panel">
+      <h2>Джерела</h2>
+      <div id="sourcesList"></div>
+      <button class="ms-btn secondary" id="addSourceBtn" style="margin-top:10px">+ Додати джерело</button>
+    </div>
+
+    <div class="ms-panel ms-totals">
+      <h2>Разом</h2>
+      <div class="ms-total-row ms-total-main">
+        <span>Загалом (у €)</span>
+        <span class="ms-total-amt" id="totalEur">€ 0.00</span>
+      </div>
+      <div id="byCurrencyList" class="ms-by-currency"></div>
+    </div>
+
+    <div class="ms-controls">
+      <button id="save" type="button" class="ms-btn">Зберегти</button>
+      <button id="reset" type="button" class="ms-btn secondary">Скинути все</button>
+      <button id="copy" type="button" class="ms-btn secondary">Копіювати підсумок</button>
+    </div>
+    <p class="ms-hint" id="saveStatus" style="text-align:center;margin-top:8px"></p>
+  </div>
+</div>
+<script src="balances.js"></script>
+</body>
+</html>
