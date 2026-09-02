@@ -1482,28 +1482,38 @@ function buildMonthlyBarChart(){
   p.className = 'ms-panel';
 
   const history = getAllHistoricalExpenses();
-  const byMonth = {};
-  history.forEach(t=>{
-    const key = `${t.date.getFullYear()}-${String(t.date.getMonth()+1).padStart(2,'0')}`;
-    byMonth[key] = (byMonth[key]||0) + Math.abs(t.amount);
-  });
 
-  const now = new Date();
-  const months = [];
-  for(let i=5;i>=0;i--){
-    const d = new Date(now.getFullYear(), now.getMonth()-i, 1);
-    const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-    months.push({key, label:d.toLocaleDateString('uk-UA',{month:'short'}), sum:byMonth[key]||0, isCurrent:i===0});
+  // build 7 cycle-boundary dates (10th of each month), then 6 cycles between them —
+  // matches her actual pay cycle (10-to-10), not the calendar month. boundaries[6] is
+  // the NEXT 10th (end of the current cycle), boundaries[0] is 6 cycles back.
+  const currentCycleStart = new Date(defaultPeriodStart()+'T00:00:00');
+  const boundaries = [];
+  for(let k=0;k<=6;k++){
+    const d = new Date(currentCycleStart.getFullYear(), currentCycleStart.getMonth()-5+k, 10);
+    boundaries.push(d);
   }
-  const maxSum = Math.max(1, ...months.map(m=>m.sum));
+  const cycles = [];
+  for(let i=0;i<6;i++){
+    const start = boundaries[i];
+    const end = boundaries[i+1]; // exclusive
+    const sum = history
+      .filter(t=>t.date>=start && t.date<end)
+      .reduce((s,t)=>s+Math.abs(t.amount),0);
+    cycles.push({
+      label: start.toLocaleDateString('uk-UA',{month:'short'}),
+      sum,
+      isCurrent: i===5
+    });
+  }
+  const maxSum = Math.max(1, ...cycles.map(m=>m.sum));
 
   p.innerHTML = `
     <h2>Витрати за місяцями</h2>
-    <p class="ms-hint">Останні 6 місяців, за календарем (не за платіжним циклом 10-до-10) — щоб було видно загальний темп поза прив'язкою до дати зарплати.</p>
+    <p class="ms-hint">Останні 6 платіжних циклів (10-те до 10-го, як і всюди в застосунку) — щоб порівнювати темп саме між зарплатами, а не за календарем.</p>
     <div class="ms-bars"></div>
   `;
   const barsWrap = p.querySelector('.ms-bars');
-  months.forEach(m=>{
+  cycles.forEach(m=>{
     const col = document.createElement('div');
     col.className = 'ms-bar-col';
     const heightPct = Math.max(4, (m.sum/maxSum)*100);
@@ -1562,14 +1572,23 @@ function buildCleanExpensesPanel(all, grossTotal, periodDays){
 function buildBalancePanel(){
   const p = document.createElement('div');
   p.className='ms-panel';
+  p.style.background = 'transparent';
+  p.style.border = 'none';
+  p.style.padding = '0';
   const acc = state.accounts.find(a=>a.id===state.selectedAccount);
   const currNames = {980:'UAH',978:'EUR',840:'USD',985:'PLN',946:'RON'};
   if(!acc){ p.innerHTML = ''; return p; }
   p.innerHTML = `
-    <h2>Баланс картки</h2>
-    <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
-      <span class="ms-today-amt" style="font-size:26px">${fmt(acc.balance/100)} ${currNames[acc.currency]||acc.currency}</span>
-      <span class="ms-hint" style="margin:0">${acc.type} · ${acc.pan}</span>
+    <div class="ms-balance-card">
+      <div class="ms-bc-top">
+        <div>
+          <p class="ms-bc-title">Баланс картки</p>
+          <p class="ms-bc-sub">${acc.type} · ${acc.pan}</p>
+        </div>
+        <div class="ms-bc-chip"></div>
+      </div>
+      <div class="ms-bc-amount">${fmt(acc.balance/100)} ${currNames[acc.currency]||acc.currency}</div>
+      ${acc.currency!==978 ? `<p class="ms-bc-eur">${fmtEur(acc.balance/100, acc.currency).trim()}</p>` : ''}
     </div>
   `;
   return p;
