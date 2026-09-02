@@ -157,19 +157,24 @@
     display:flex;flex-direction:column;align-items:center;gap:18px;
     margin:6px 0 4px;
   }
-  .ms-donut-wrap{position:relative;width:172px;height:172px;flex-shrink:0;}
-  .ms-donut{width:172px;height:172px;border-radius:50%;}
+  .ms-donut-wrap{position:relative;width:180px;height:180px;flex-shrink:0;}
+  .ms-donut{
+    width:180px;height:180px;border-radius:50%;
+    box-shadow: 0 10px 24px -8px rgba(74,54,35,0.22), inset 0 1px 2px rgba(255,255,255,0.4);
+  }
   .ms-donut-center{
     position:absolute;inset:0;display:flex;flex-direction:column;
     align-items:center;justify-content:center;text-align:center;
+    margin:auto;width:112px;height:112px;border-radius:50%;
+    background:var(--panel);
+    box-shadow: inset 0 2px 6px rgba(74,54,35,0.08), 0 1px 2px rgba(255,255,255,0.6);
   }
-  .ms-donut-center .amt{font-family:var(--font-display);font-size:20px;font-weight:500;}
-  .ms-donut-center .lbl{font-size:10.5px;color:var(--muted);margin-top:2px;letter-spacing:.03em;}
-  .ms-legend{display:flex;flex-direction:column;gap:2px;width:100%;}
-  .ms-legend-row{display:flex;align-items:center;gap:9px;font-size:13px;padding:8px 2px;border-bottom:1px solid var(--line);}
-  .ms-legend-row:last-child{border-bottom:none;}
+  .ms-donut-center .amt{font-family:var(--font-display);font-size:19px;font-weight:600;}
+  .ms-donut-center .lbl{font-size:10px;color:var(--muted);margin-top:2px;letter-spacing:.03em;}
+  .ms-legend{display:flex;flex-direction:column;gap:3px;width:100%;}
+  .ms-legend-row{display:flex;align-items:center;gap:9px;font-size:13px;padding:8px 8px;border-radius:9px;transition:background .12s;}
   .ms-legend-icon{font-size:16px;width:20px;text-align:center;flex-shrink:0;}
-  .ms-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
+  .ms-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;box-shadow:0 1px 2px rgba(0,0,0,0.15);}
   .ms-legend-cat{flex:1;}
   .ms-legend-cat select{
     background:transparent;border:none;color:var(--text);font-size:13px;
@@ -269,6 +274,18 @@
   .ms-icon-btn:hover{opacity:1;filter:none;}
   .ms-note-preview{font-size:11px;color:var(--muted);font-style:italic;margin-top:2px;}
   .ms-footer-note{color:var(--muted);font-size:11px;margin-top:20px;line-height:1.6;text-align:center;}
+
+  .ms-bars{display:flex;align-items:flex-end;gap:10px;height:140px;margin-top:14px;padding:0 4px;}
+  .ms-bar-col{flex:1;display:flex;flex-direction:column;align-items:center;height:100%;}
+  .ms-bar-amt{font-size:10.5px;color:var(--muted);font-family:var(--font-mono);margin-bottom:4px;white-space:nowrap;}
+  .ms-bar-track{flex:1;width:100%;display:flex;align-items:flex-end;}
+  .ms-bar-fill{
+    width:100%;background:var(--panel-hi);border-radius:6px 6px 2px 2px;
+    box-shadow:inset 0 1px 1px rgba(255,255,255,0.5);transition:height .3s;
+  }
+  .ms-bar-fill-current{background:var(--gold);}
+  .ms-bar-label{font-size:11px;color:var(--muted);margin-top:6px;text-transform:capitalize;}
+  .ms-bar-label-current{color:var(--gold);font-weight:600;}
 
   .ms-section-divider{
     height:1px;background:linear-gradient(90deg, transparent, var(--line) 20%, var(--line) 80%, transparent);

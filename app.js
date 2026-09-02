@@ -1458,6 +1458,11 @@ function resultsPanel(){
   panel3.style.marginBottom = '14px';
   wrap.appendChild(panel3);
 
+  // monthly comparison bar chart — full history, own full-width row
+  const panelMonthly = buildMonthlyBarChart();
+  panelMonthly.style.marginBottom = '14px';
+  wrap.appendChild(panelMonthly);
+
   // big standalone section at the very bottom, separate from everything above — trips
   const divider = document.createElement('div');
   divider.className = 'ms-section-divider';
@@ -1465,6 +1470,50 @@ function resultsPanel(){
   wrap.appendChild(panelTrips);
 
   p.appendChild(wrap);
+  return p;
+}
+
+// Groups every cached expense by calendar month and renders a simple CSS bar chart —
+// last 6 months, most recent on the right, so she can see at a glance whether this
+// month is running higher or lower than her usual pace. No charting library needed,
+// consistent with the rest of the app's plain-CSS visuals.
+function buildMonthlyBarChart(){
+  const p = document.createElement('div');
+  p.className = 'ms-panel';
+
+  const history = getAllHistoricalExpenses();
+  const byMonth = {};
+  history.forEach(t=>{
+    const key = `${t.date.getFullYear()}-${String(t.date.getMonth()+1).padStart(2,'0')}`;
+    byMonth[key] = (byMonth[key]||0) + Math.abs(t.amount);
+  });
+
+  const now = new Date();
+  const months = [];
+  for(let i=5;i>=0;i--){
+    const d = new Date(now.getFullYear(), now.getMonth()-i, 1);
+    const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    months.push({key, label:d.toLocaleDateString('uk-UA',{month:'short'}), sum:byMonth[key]||0, isCurrent:i===0});
+  }
+  const maxSum = Math.max(1, ...months.map(m=>m.sum));
+
+  p.innerHTML = `
+    <h2>Витрати за місяцями</h2>
+    <p class="ms-hint">Останні 6 місяців, за календарем (не за платіжним циклом 10-до-10) — щоб було видно загальний темп поза прив'язкою до дати зарплати.</p>
+    <div class="ms-bars"></div>
+  `;
+  const barsWrap = p.querySelector('.ms-bars');
+  months.forEach(m=>{
+    const col = document.createElement('div');
+    col.className = 'ms-bar-col';
+    const heightPct = Math.max(4, (m.sum/maxSum)*100);
+    col.innerHTML = `
+      <div class="ms-bar-amt">${m.sum ? fmt(m.sum) : ''}</div>
+      <div class="ms-bar-track"><div class="ms-bar-fill${m.isCurrent?' ms-bar-fill-current':''}" style="height:${heightPct}%"></div></div>
+      <div class="ms-bar-label${m.isCurrent?' ms-bar-label-current':''}">${m.label}</div>
+    `;
+    barsWrap.appendChild(col);
+  });
   return p;
 }
 function buildCleanExpensesPanel(all, grossTotal, periodDays){
