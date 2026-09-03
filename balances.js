@@ -85,7 +85,7 @@
       nameInput.type = 'text';
       nameInput.value = src.name;
       nameInput.placeholder = 'Назва джерела';
-      nameInput.addEventListener('input', e => { sources[i].name = e.target.value; setDirty(true); });
+      nameInput.addEventListener('input', e => { sources[i].name = e.target.value; setDirty(true); autoSave(); });
 
       const amountInput = document.createElement('input');
       amountInput.type = 'number';
@@ -96,6 +96,7 @@
         sources[i].amount = e.target.value;
         setDirty(true);
         updateTotals();
+        autoSave();
       });
       amountInput.addEventListener('keydown', e => {
         if(['e','E','+'].includes(e.key)) e.preventDefault(); // no exponent notation in a money field
@@ -113,6 +114,7 @@
         sources[i].currency = e.target.value;
         setDirty(true);
         updateTotals();
+        autoSave();
       });
 
       const eurLabel = document.createElement('span');
@@ -187,6 +189,21 @@
     }catch(e){
       console.error('saveToStorage error', e);
     }
+  }
+
+  // Writes to localStorage automatically as she types, debounced so it's not on every
+  // single keystroke — so nothing gets lost just because the Save button wasn't clicked.
+  let autoSaveTimer = null;
+  function autoSave(){
+    clearTimeout(autoSaveTimer);
+    autoSaveTimer = setTimeout(() => {
+      try{
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(sources));
+        setDirty(false);
+      }catch(e){
+        console.error('autoSave error', e);
+      }
+    }, 500);
   }
 
   document.addEventListener('DOMContentLoaded', () => {
