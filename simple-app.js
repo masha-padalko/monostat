@@ -2,67 +2,49 @@
 (function(){
 try{
 
-let CATS = ['продукти','продукти спільні','такси','транспорт','Путешествия транспорт: самолёт','Путешествия транспорт: кава в літаку','Путешествия транспорт: поезд',
-  'Путешествия транспорт: автобус','Путешествия транспорт: інше','авто','бензин','обеды','дц','бьюти',
-  'лекарства','анализи','йожа','подарунки','розваги','розваги спільні','Internet','одежда','готівка (зняття)','послуги (ФОП)',
-  'перекази людям','квартплата','інше'];
+// Спрощений, універсальний набір категорій — без особистих прив'язок до
+// конкретних магазинів (ті лишились тільки в основній версії застосунку).
+// Класифікація йде тільки за кодом MCC, який дає сам Monobank — жодних
+// персональних keyword-правил, щоб кожен новий користувач починав з чистого
+// аркуша і вчив свої власні категорії поступово, а не отримував чужі звички.
+let CATS = ['продукти','кафе і ресторани','транспорт','авто і бензин','аптека і здоров\'я',
+  'одяг та покупки','розваги','комунальні послуги та зв\'язок','готівка (зняття)',
+  'перекази людям','послуги','інше'];
 
 function sortedCats(){
   return [...CATS].sort((a,b)=>a.localeCompare(b,'uk'));
 }
 
 const COLORS = {
-  'продукти':'#C9A24B','продукти спільні':'#C4A24B','такси':'#4FA98C','транспорт':'#7FB7A3',
-  'Путешествия транспорт: самолёт':'#B7734F','Путешествия транспорт: кава в літаку':'#D9A374','Путешествия транспорт: поезд':'#D4956E',
-  'Путешествия транспорт: автобус':'#E3B084','Путешествия транспорт: інше':'#8C6A4E',
-  'авто':'#8C6A5C','бензин':'#C15B4A','обеды':'#E0C468','дц':'#6E8FA8','бьюти':'#A87FA8',
-  'лекарства':'#7FA8A0','анализи':'#5C8C8C','йожа':'#8FA85C','подарунки':'#D48FAA',
-  'розваги':'#B88AC4','розваги спільні':'#C4A0CE',
-  'Internet':'#5C7A8C','одежда':'#A8955C','готівка (зняття)':'#6B6459',
-  'послуги (ФОП)':'#8C7A5C','перекази людям':'#5C6B8C',
-  'квартплата':'#6E7F5C','інше':'#4A443A'
+  'продукти':'#C9A24B','кафе і ресторани':'#E0C468','транспорт':'#7FB7A3','авто і бензин':'#C15B4A',
+  'аптека і здоров\'я':'#7FA8A0','одяг та покупки':'#A8955C','розваги':'#B88AC4',
+  'комунальні послуги та зв\'язок':'#5C7A8C','готівка (зняття)':'#6B6459',
+  'перекази людям':'#5C6B8C','послуги':'#8C7A5C','інше':'#4A443A'
 };
 
 const ICONS = {
-  'продукти':'🧺','продукти спільні':'🧺🤝','такси':'🚕','транспорт':'🚌',
-  'Путешествия транспорт: самолёт':'✈️','Путешествия транспорт: кава в літаку':'☕','Путешествия транспорт: поезд':'🚆',
-  'Путешествия транспорт: автобус':'🚌','Путешествия транспорт: інше':'🧳',
-  'авто':'🚗','бензин':'⛽','обеды':'🍽️','дц':'🏬','бьюти':'💅',
-  'лекарства':'💊','анализи':'💉','йожа':'🧘','подарунки':'🎁',
-  'розваги':'🎉','розваги спільні':'🎉🤝',
-  'Internet':'📶','одежда':'👗','готівка (зняття)':'💵',
-  'послуги (ФОП)':'🧾','перекази людям':'🤝',
-  'квартплата':'🏠','інше':'❓'
+  'продукти':'🧺','кафе і ресторани':'🍽️','транспорт':'🚌','авто і бензин':'⛽',
+  'аптека і здоров\'я':'💊','одяг та покупки':'👗','розваги':'🎉',
+  'комунальні послуги та зв\'язок':'📶','готівка (зняття)':'💵',
+  'перекази людям':'🤝','послуги':'🧾','інше':'❓'
 };
 
 function defaultRules(){
-  return [
-    {kw:['фора','сільпо','атб','novus','lidl','carrefour','велмарт','megaimage','gatedo','mini mart','kollmarket','ovochi','лоток','moldretail','коло','маркетопт','ашан','екомаркет','stambo'],cat:'продукти'},
-    {kw:['bolt','uklon','uber'],cat:'такси'},
-    {kw:['wizz','ryanair','turkish air','lufthansa','kiwi.com','flyone','aelia'],cat:'Путешествия транспорт: самолёт'},
-    {kw:['укрзалізниця','залізни','cfr','societatea nationala'],cat:'Путешествия транспорт: поезд'},
-    {kw:['flixbus','bus station','автовокзал'],cat:'Путешествия транспорт: автобус'},
-    {kw:['omio','busfor'],cat:'Путешествия транспорт: інше'},
-    {kw:['окко','wog','азс','avias','socar','glusco','azs'],cat:'бензин'},
-    {kw:['kaviarnia','dnata catering','zhniva','santandreea','imbarcadero','vypichka','the coffee','кав\'ярня','кафе'],cat:'обеды'},
-    {kw:['prostor','brocard','eva '],cat:'дц'},
-    {kw:['salon','medcity','салон крас'],cat:'бьюти'},
-    {kw:['аптека','apteka','аптечка'],cat:'лекарства'},
-    {kw:['діла','synevo','сінево','медична лаборатор'],cat:'анализи'},
-    {kw:['йога','yoga','sport life','спортлайф'],cat:'йожа'},
-    {kw:['rozetka','tezenis','media galaxy','wayforpay','нова пошта','mo sviato'],cat:'подарунки'},
-    {kw:['vodafone','kyivstar','київстар','lifecell','terms','google'],cat:'Internet'},
-    {kw:['humana'],cat:'одежда'},
-    {kw:['atm '],cat:'готівка (зняття)'},
-    {kw:['фоп '],cat:'послуги (ФОП)'}
-  ];
+  return []; // жодних персональних keyword-правил — тільки MCC нижче
 }
 
 function mccFallback(mcc){
-  const m = {4111:'транспорт',4112:'Путешествия транспорт: поезд',4121:'такси',4131:'Путешествия транспорт: інше',
-    4722:'Путешествия транспорт: самолёт',3000:'Путешествия транспорт: самолёт',5411:'продукти',5499:'продукти',
-    5541:'бензин',5814:'обеды',5812:'обеды',5977:'бьюти',5912:'лекарства',8071:'анализи',8099:'анализи',
-    7997:'йожа',5691:'одежда',6011:'готівка (зняття)',4900:'Internet',4814:'Internet',7299:'Путешествия транспорт: інше'};
+  const m = {
+    5411:'продукти',5499:'продукти',5814:'кафе і ресторани',5812:'кафе і ресторани',
+    4111:'транспорт',4121:'транспорт',4131:'транспорт',4112:'транспорт',
+    5541:'авто і бензин',5542:'авто і бензин',
+    5912:'аптека і здоров\'я',8071:'аптека і здоров\'я',8099:'аптека і здоров\'я',
+    5691:'одяг та покупки',5651:'одяг та покупки',5732:'одяг та покупки',
+    7997:'розваги',7832:'розваги',5813:'розваги',
+    4900:'комунальні послуги та зв\'язок',4814:'комунальні послуги та зв\'язок',
+    6011:'готівка (зняття)',6010:'готівка (зняття)',
+    7299:'послуги'
+  };
   return m[mcc] || null;
 }
 
@@ -73,8 +55,6 @@ function isPersonTransfer(desc){
 function categorize(desc, mcc, amount, overrides, rules){
   const d = desc.toLowerCase();
   if(overrides[desc]) return overrides[desc];
-  // small Wizz Air charges (under 600) are onboard snacks/coffee/seat fees, not the ticket itself
-  if(d.includes('wizz') && amount < 0 && Math.abs(amount) < 600) return 'Путешествия транспорт: кава в літаку';
   for(const r of rules){
     for(const kw of r.kw){ if(d.includes(kw)) return r.cat; }
   }
@@ -1247,12 +1227,12 @@ function resultsPanel(){
 
   const panel2 = document.createElement('div');
   panel2.className='ms-panel';
-  panel2.innerHTML = `<h2>Всі операції</h2><p class="ms-hint">Категорію можна змінити прямо тут — вибір запам'ятається для цього мерчанта надалі. Іконкою 📝 можна додати нотатку до конкретної покупки — що це було насправді. У колонці «Поїздка» можна прив'язати трату до конкретної подорожі (створюються нижче, в «Подорожі»). Галочка «чисто» — познач, якщо це насправді не витрата (повернули гроші, поповнення фонду тощо) — вплине на «Чисті трати» нижче.</p>
+  panel2.innerHTML = `<h2>Всі операції</h2><p class="ms-hint">Категорію можна змінити прямо тут — вибір запам'ятається для цього мерчанта надалі. Іконкою 📝 можна додати нотатку до конкретної покупки — що це було насправді. Галочка «чисто» — познач, якщо це насправді не витрата (повернули гроші, поповнення фонду тощо).</p>
     <div class="ms-field" style="margin-bottom:10px">
       <input type="text" id="txSearchInput" placeholder="Пошук за описом або власною нотаткою…" value="${escapeHtml(state.txSearchQuery||'')}">
     </div>
     <div style="font-size:13px;color:var(--muted);margin-bottom:12px" id="txSearchSummary">Разом витрачено: <b style="color:var(--gold);font-family:var(--font-mono)">${fmt(total)} ${curSym()}</b>${fmtEur(total, curCode())} · ${all.length} операцій</div>
-    <div class="ms-table-wrap"><table class="ms-tx"><thead><tr><th>Дата</th><th>Опис</th><th>Категорія</th><th>Поїздка</th><th title="Не витрата">Чисто</th><th style="text-align:right">Сума</th></tr></thead><tbody id="txBody"></tbody></table></div>`;
+    <div class="ms-table-wrap"><table class="ms-tx"><thead><tr><th>Дата</th><th>Опис</th><th>Категорія</th><th title="Не витрата">Чисто</th><th style="text-align:right">Сума</th></tr></thead><tbody id="txBody"></tbody></table></div>`;
   const tbody = panel2.querySelector('#txBody');
   all.sort((a,b)=>b.date-a.date).forEach(t=>{
     const tr = document.createElement('tr');
@@ -1275,7 +1255,7 @@ function resultsPanel(){
       handleCategoryChange(t, e.target.value);
     });
 
-    tr.innerHTML = `<td>${dateStr}${t.manual?' <span class="ms-tag">ручне</span>':''}</td><td></td><td></td><td></td><td style="text-align:center"></td><td style="text-align:right" class="ms-amt-neg">−${fmt(t.amount)}</td>`;
+    tr.innerHTML = `<td>${dateStr}${t.manual?' <span class="ms-tag">ручне</span>':''}</td><td></td><td></td><td style="text-align:center"></td><td style="text-align:right" class="ms-amt-neg">−${fmt(t.amount)}</td>`;
 
     const descCell = tr.children[1];
     const descLine = document.createElement('div');
@@ -1302,26 +1282,7 @@ function resultsPanel(){
     catCell.style.alignItems = 'center';
     catCell.appendChild(sel);
 
-    const tripCell = tr.children[3];
-    if(state.trips.length===0){
-      tripCell.innerHTML = '<span style="color:var(--muted);font-size:11px">—</span>';
-    }else{
-      const tripSel = document.createElement('select');
-      tripSel.className = 'ms-cat-select';
-      const noneOpt = document.createElement('option');
-      noneOpt.value = ''; noneOpt.textContent = '—';
-      tripSel.appendChild(noneOpt);
-      state.trips.forEach(tr2=>{
-        const opt = document.createElement('option');
-        opt.value = tr2.id; opt.textContent = tr2.name;
-        if(state.tripOf[key]===tr2.id) opt.selected = true;
-        tripSel.appendChild(opt);
-      });
-      tripSel.addEventListener('change', e=>{ assignTrip(key, e.target.value); });
-      tripCell.appendChild(tripSel);
-    }
-
-    const cleanCell = tr.children[4];
+    const cleanCell = tr.children[3];
     const cleanChk = document.createElement('input');
     cleanChk.type = 'checkbox';
     cleanChk.checked = isNotExpense;
@@ -1414,14 +1375,7 @@ function resultsPanel(){
   const panelIncoming = buildIncomingPanel();
   const panelTransfer = buildDataTransferPanel();
   const panelCustomCat = buildCustomCategoryPanel();
-  const panelTrips = buildTripsPanel(getAllHistoricalExpenses());
   const panelRange = rangePanel();
-  const panelClean = buildCleanExpensesPanel(all, total, periodDays);
-  if(state.jarEnabled && !state.jarAutoCheckedThisLoad && (state.jarPeriodStart !== defaultPeriodStart() || !state.jarLastDate || state.jarLastDate < todayStr())){
-    state.jarAutoCheckedThisLoad = true;
-    updateJarAccumulation().then(()=>render());
-  }
-  const panelDailyBudget = buildDailyBudgetPanel(all);
 
   const wrap = document.createElement('div');
 
@@ -1429,17 +1383,9 @@ function resultsPanel(){
   panelRange.style.marginBottom = '14px';
   wrap.appendChild(panelRange);
 
-  // row 1b: balance next to the daily-budget breakdown
-  const balanceRow = document.createElement('div');
-  balanceRow.className = 'ms-grid';
-  balanceRow.style.marginBottom = '14px';
-  balanceRow.appendChild(panelBalance);
-  balanceRow.appendChild(panelDailyBudget);
-  wrap.appendChild(balanceRow);
-
-  // чисті трати — right under period/balance
-  panelClean.style.marginBottom = '14px';
-  wrap.appendChild(panelClean);
+  // row 1b: balance, full width on its own (no daily-budget breakdown in this version)
+  panelBalance.style.marginBottom = '14px';
+  wrap.appendChild(panelBalance);
 
   // row 2: overview (where balance used to be) next to today/yesterday
   const topRow = document.createElement('div');
@@ -1469,18 +1415,63 @@ function resultsPanel(){
   panel3.style.marginBottom = '14px';
   wrap.appendChild(panel3);
 
+  // named supermarket chains — total spent at each, across the whole cached history
+  const panelSupermarkets = buildSupermarketsPanel();
+  panelSupermarkets.style.marginBottom = '14px';
+  wrap.appendChild(panelSupermarkets);
+
   // monthly comparison bar chart — full history, own full-width row
   const panelMonthly = buildMonthlyBarChart();
   panelMonthly.style.marginBottom = '14px';
   wrap.appendChild(panelMonthly);
 
-  // big standalone section at the very bottom, separate from everything above — trips
-  const divider = document.createElement('div');
-  divider.className = 'ms-section-divider';
-  wrap.appendChild(divider);
-  wrap.appendChild(panelTrips);
-
   p.appendChild(wrap);
+  return p;
+}
+
+// Tracks a fixed set of named supermarket chains (not a generic "all merchants" list —
+// specifically the big Ukrainian grocery chains) and totals spending at each across the
+// ENTIRE cached history, not just the currently selected period, since the point is
+// "how much have I spent at NOVUS overall", not "this month only".
+function buildSupermarketsPanel(){
+  const p = document.createElement('div');
+  p.className = 'ms-panel';
+
+  const CHAINS = [
+    {label:'Фора', match:['фора','fora']},
+    {label:'АТБ', match:['атб','atb']},
+    {label:'NOVUS', match:['novus','новус']},
+    {label:'Сільпо', match:['сільпо','silpo']},
+  ];
+
+  const history = getAllHistoricalExpenses();
+  const totals = CHAINS.map(chain=>{
+    const txs = history.filter(t=>{
+      const d = t.desc.toLowerCase();
+      return chain.match.some(m=>d.includes(m));
+    });
+    return { label: chain.label, sum: txs.reduce((s,t)=>s+Math.abs(t.amount),0), count: txs.length };
+  });
+  const grandTotal = totals.reduce((s,t)=>s+t.sum,0);
+
+  p.innerHTML = `<h2>Супермаркети</h2><p class="ms-hint">Скільки всього витрачено в кожній із цих мереж за весь час, що є в кеші (не лише за поточний період).</p><div id="supermarketRows"></div>`;
+  const rowsWrap = p.querySelector('#supermarketRows');
+  totals.forEach(t=>{
+    const row = document.createElement('div');
+    row.className = 'ms-today-cat-row';
+    row.innerHTML = `<span class="ms-today-cat-name">${t.label}</span><span class="ms-today-cat-amt">${t.count} оп.</span><span class="ms-today-cat-amt" style="color:var(--gold);min-width:80px;text-align:right">${fmt(t.sum)} ${curSym()}</span>`;
+    rowsWrap.appendChild(row);
+  });
+  if(grandTotal>0){
+    const totalRow = document.createElement('div');
+    totalRow.className = 'ms-today-cat-row';
+    totalRow.style.fontWeight = '600';
+    totalRow.style.borderTop = '1px solid var(--line)';
+    totalRow.style.marginTop = '4px';
+    totalRow.style.paddingTop = '8px';
+    totalRow.innerHTML = `<span class="ms-today-cat-name">Разом</span><span></span><span class="ms-today-cat-amt" style="min-width:80px;text-align:right">${fmt(grandTotal)} ${curSym()}</span>`;
+    rowsWrap.appendChild(totalRow);
+  }
   return p;
 }
 
