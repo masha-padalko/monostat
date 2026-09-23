@@ -1469,6 +1469,16 @@ function resultsPanel(){
   panel3.style.marginBottom = '14px';
   wrap.appendChild(panel3);
 
+  // recurring payments — Orange/Vodafone/Claude etc, own full-width row
+  const panelRecurring = buildRecurringPaymentsPanel();
+  panelRecurring.style.marginBottom = '14px';
+  wrap.appendChild(panelRecurring);
+
+  // big tile-style grouped categories (авто+бензин, здоров'я, подорожі)
+  const panelGroupTiles = buildCategoryGroupTilesPanel(all);
+  panelGroupTiles.style.marginBottom = '14px';
+  wrap.appendChild(panelGroupTiles);
+
   // monthly comparison bar chart — full history, own full-width row
   const panelMonthly = buildMonthlyBarChart();
   panelMonthly.style.marginBottom = '14px';
@@ -1488,6 +1498,91 @@ function resultsPanel(){
 // last 6 months, most recent on the right, so she can see at a glance whether this
 // month is running higher or lower than her usual pace. No charting library needed,
 // consistent with the rest of the app's plain-CSS visuals.
+// Groups a few related categories into single big tiles — авто+бензин, здоров'я
+// (лекарства+анализи+Врачи), подорожі (усі "Путешествия..." категорії) — everything
+// else stays exactly as it already is elsewhere (donut/legend/table), this is purely
+// an additional, coarser view for these specific groups.
+const CATEGORY_GROUPS = [
+  {label:'Авто', icon:'🚗', cats:['авто','бензин']},
+  {label:'Здоров\'я', icon:'🏥', cats:['лекарства','анализи','Врачи']},
+  {label:'Подорожі', icon:'🧳', cats: null, matchPrefix:'Путешествия'}, // matched dynamically below
+];
+function buildCategoryGroupTilesPanel(all){
+  const p = document.createElement('div');
+  p.className = 'ms-panel';
+
+  const tiles = CATEGORY_GROUPS.map(g=>{
+    const txs = all.filter(t=>{
+      if(g.matchPrefix) return t.cat && (t.cat.startsWith(g.matchPrefix) || t.cat==='Путешествия - жилье');
+      return g.cats.includes(t.cat);
+    });
+    return { ...g, sum: txs.reduce((s,t)=>s+Math.abs(t.amount),0), count: txs.length };
+  });
+
+  p.innerHTML = `<h2>Групи категорій</h2><div class="ms-tile-grid"></div>`;
+  const grid = p.querySelector('.ms-tile-grid');
+  tiles.forEach(t=>{
+    const tile = document.createElement('div');
+    tile.className = 'ms-cat-tile';
+    tile.innerHTML = `
+      <div class="ms-cat-tile-icon">${t.icon}</div>
+      <div class="ms-cat-tile-label">${t.label}</div>
+      <div class="ms-cat-tile-sum">${fmt(t.sum)} ${curSym()}</div>
+      <div class="ms-cat-tile-count">${t.count} оп.</div>
+    `;
+    grid.appendChild(tile);
+  });
+  return p;
+}
+
+// Known recurring subscriptions/bills, detected from the cache by keyword. Since a
+// real background push notification needs a server (this app has none — it's a
+// static page), this is an always-visible panel instead: it shows the next expected
+// due date (last payment + ~1 month) and highlights it once it's within 2 days.
+// She sees the warning whenever she opens the app around that time, which is the
+// honest, actually-deliverable version of "remind me".
+const RECURRING_PAYMENTS = [
+  {label:'Orange', icon:'📱', match:['orange']},
+  {label:'Vodafone', icon:'📶', match:['vodafone']},
+  {label:'Claude', icon:'🤖', match:['claude']},
+];
+function buildRecurringPaymentsPanel(){
+  const p = document.createElement('div');
+  p.className = 'ms-panel';
+
+  const history = getAllHistoricalExpenses();
+  const today = new Date(); today.setHours(0,0,0,0);
+
+  const rows = RECURRING_PAYMENTS.map(rp=>{
+    const matches = history.filter(t=>rp.match.some(m=>t.desc.toLowerCase().includes(m)));
+    if(!matches.length) return null;
+    const last = matches.reduce((a,b)=>a.date>b.date?a:b);
+    const nextDue = new Date(last.date.getFullYear(), last.date.getMonth()+1, last.date.getDate());
+    const daysLeft = Math.round((nextDue.getTime()-today.getTime())/(24*60*60*1000));
+    return { label:rp.label, icon:rp.icon, lastAmt:Math.abs(last.amount), lastDate:last.date, nextDue, daysLeft };
+  }).filter(Boolean);
+
+  if(!rows.length){ p.innerHTML=''; return p; }
+
+  p.innerHTML = `<h2>Регулярні платежі</h2><p class="ms-hint">Орієнтовна дата наступного платежу — останній платіж + місяць. Це не справжнє push-сповіщення (сайт без сервера не може надіслати його, поки застосунок закритий) — просто попередження тут, коли відкриваєш застосунок ближче до дати.</p><div id="recurringRows"></div>`;
+  const wrap = p.querySelector('#recurringRows');
+  rows.forEach(r=>{
+    const soon = r.daysLeft<=2;
+    const row = document.createElement('div');
+    row.className = 'ms-today-cat-row';
+    if(soon) row.style.background = 'rgba(184,92,74,0.08)';
+    row.innerHTML = `
+      <span class="ms-today-cat-name">${r.icon} ${r.label}</span>
+      <span class="ms-today-cat-amt" style="color:var(--muted)">останній: ${r.lastDate.toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'})}, ${fmt(r.lastAmt)}</span>
+      <span class="ms-today-cat-amt" style="${soon?'color:var(--rust);font-weight:700':'color:var(--muted)'}">
+        ${r.daysLeft<0 ? 'мабуть, вже сплачено' : (soon ? `⚠ через ${r.daysLeft} дн.` : `через ${r.daysLeft} дн.`)}
+      </span>
+    `;
+    wrap.appendChild(row);
+  });
+  return p;
+}
+
 function buildMonthlyBarChart(){
   const p = document.createElement('div');
   p.className = 'ms-panel';

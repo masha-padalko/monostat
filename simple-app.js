@@ -122,6 +122,7 @@ let state = {
   todayTxs: null,        // independent last-48h fetch, used when main range doesn't cover today/yesterday
   todayLoading: false,
   expandedCats: {},
+  expandedSupermarkets: {},
   expandedBlocks: {transactions:false, incoming:false}, // accordion-style "show more" for the 3-col panels
   notes: {...window.MonoStatDefaults.DEFAULT_NOTES},         // txKey -> free-text note about that specific transaction
   dayExcluded: {...window.MonoStatDefaults.DEFAULT_DAY_EXCLUDED},     // txKey -> true if unchecked in "Зараз" (excluded from today/yesterday total)
@@ -212,41 +213,48 @@ async function requestPasswordReset(email){
   return await supabaseClient.auth.resetPasswordForEmail(email, { redirectTo: window.location.href });
 }
 
+// Проста версія використовує ОКРЕМИЙ префікс ключів — навіть якщо відкрити цю
+// сторінку під тим самим акаунтом, що й основний застосунок, дані (категорії,
+// нотатки, кеш операцій тощо) ніколи не змішаються між ними.
+const SIMPLE_KEY_PREFIX = 'simple_';
+
 async function storageGet(key){
+  const fullKey = SIMPLE_KEY_PREFIX + key;
   if(supabaseClient && !LOCAL_ONLY_KEYS.has(key) && authUserId){
     try{
-      const { data, error } = await supabaseClient.from('kv_store').select('value').eq('key', key).eq('user_id', authUserId).maybeSingle();
+      const { data, error } = await supabaseClient.from('kv_store').select('value').eq('key', fullKey).eq('user_id', authUserId).maybeSingle();
       if(error) throw error;
       if(data) return typeof data.value === 'string' ? data.value : JSON.stringify(data.value);
       return null;
     }catch(e){
-      console.warn('Supabase storageGet failed, falling back:', key, e);
+      console.warn('Supabase storageGet failed, falling back:', fullKey, e);
     }
   }
   try{
-    const r = await window.storage.get(key, false);
+    const r = await window.storage.get(fullKey, false);
     return r ? r.value : null;
   }catch(e){
-    try{ return localStorage.getItem('monostat_'+key); }catch(e2){ return null; }
+    try{ return localStorage.getItem('monostat_'+fullKey); }catch(e2){ return null; }
   }
 }
 async function storageSet(key, value){
+  const fullKey = SIMPLE_KEY_PREFIX + key;
   if(supabaseClient && !LOCAL_ONLY_KEYS.has(key) && authUserId){
     try{
       let parsed;
       try{ parsed = JSON.parse(value); }catch(e){ parsed = value; }
-      const { error } = await supabaseClient.from('kv_store').upsert({ key, value: parsed, user_id: authUserId, updated_at: new Date().toISOString() }, { onConflict: 'key,user_id' });
+      const { error } = await supabaseClient.from('kv_store').upsert({ key: fullKey, value: parsed, user_id: authUserId, updated_at: new Date().toISOString() }, { onConflict: 'key,user_id' });
       if(error) throw error;
       return;
     }catch(e){
-      console.warn('Supabase storageSet failed, falling back:', key, e);
+      console.warn('Supabase storageSet failed, falling back:', fullKey, e);
     }
   }
   try{
-    await window.storage.set(key, value, false);
+    await window.storage.set(fullKey, value, false);
     return;
   }catch(e){
-    try{ localStorage.setItem('monostat_'+key, value); }catch(e2){}
+    try{ localStorage.setItem('monostat_'+fullKey, value); }catch(e2){}
   }
 }
 
@@ -1114,52 +1122,8 @@ function resultsPanel(){
   panel1.className='ms-panel';
   const donutGradient = buildConicGradient(catList, total);
 
-  // trip spend for THIS period only (not all-time) — she can already see full-trip
-  // totals in "Подорожі", this is specifically "how much of THIS period was travel"
-  const CURRENCY_FLAGS = {
-    980:'🇺🇦', 978:'🇪🇺', 840:'🇺🇸', 985:'🇵🇱', 946:'🇷🇴', 981:'🇬🇪', 498:'🇲🇩',
-    949:'🇹🇷', 826:'🇬🇧', 203:'🇨🇿', 348:'🇭🇺', 752:'🇸🇪', 578:'🇳🇴', 208:'🇩🇰', 756:'🇨🇭'
-  };
-  const tripSpendByTrip = {};
-  const tripCurrencySpend = {};
-  all.forEach(t=>{
-    const tid = state.tripOf[txKey(t)];
-    if(!tid) return;
-    tripSpendByTrip[tid] = (tripSpendByTrip[tid]||0) + Math.abs(t.amount);
-    if(t.currency && t.currency!==980){
-      tripCurrencySpend[tid] = tripCurrencySpend[tid] || {};
-      tripCurrencySpend[tid][t.currency] = (tripCurrencySpend[tid][t.currency]||0) + Math.abs(t.amount);
-    }
-  });
-  const tripEntries = Object.entries(tripSpendByTrip)
-    .map(([tid,sum])=>{
-      const currencySpend = tripCurrencySpend[tid];
-      // every distinct foreign currency actually spent in, not just the biggest one —
-      // a trip through several countries should show all their flags, not one "winner"
-      const flags = currencySpend
-        ? Object.entries(currencySpend).sort((a,b)=>b[1]-a[1]).map(([cur])=>CURRENCY_FLAGS[cur]).filter(Boolean)
-        : ['🧳'];
-      return {
-        name: state.trips.find(t=>t.id===tid)?.name || '?',
-        sum,
-        flags: [...new Set(flags)].join(' ')
-      };
-    })
-    .sort((a,b)=>b.sum-a.sum);
-  const tripPeriodTotal = tripEntries.reduce((s,e)=>s+e.sum,0);
-
   panel1.innerHTML = `
     <h2>Загальна картина</h2>
-    ${tripPeriodTotal>0 ? `
-    <div class="ms-trip-period-summary">
-      <div class="ms-hint" style="margin-bottom:6px">🧳 Поїздки за цей період</div>
-      ${tripEntries.map(e=>`
-        <div class="ms-trip-period-row">
-          <span class="ms-trip-period-name">${e.flags} ${escapeHtml(e.name)}</span>
-          <span class="ms-trip-period-amt">${fmt(e.sum)} ${curSym()}<span class="ms-trip-period-eur">${fmtEur(e.sum, curCode())}</span></span>
-        </div>
-      `).join('')}
-    </div>` : ''}
     <div class="ms-hero">
       <div class="ms-donut-wrap">
         <div class="ms-donut" style="background:conic-gradient(${donutGradient})"></div>
@@ -1416,7 +1380,7 @@ function resultsPanel(){
   wrap.appendChild(panel3);
 
   // named supermarket chains — total spent at each, across the whole cached history
-  const panelSupermarkets = buildSupermarketsPanel();
+  const panelSupermarkets = buildSupermarketsPanel(all);
   panelSupermarkets.style.marginBottom = '14px';
   wrap.appendChild(panelSupermarkets);
 
@@ -1433,7 +1397,7 @@ function resultsPanel(){
 // specifically the big Ukrainian grocery chains) and totals spending at each across the
 // ENTIRE cached history, not just the currently selected period, since the point is
 // "how much have I spent at NOVUS overall", not "this month only".
-function buildSupermarketsPanel(){
+function buildSupermarketsPanel(all){
   const p = document.createElement('div');
   p.className = 'ms-panel';
 
@@ -1444,23 +1408,45 @@ function buildSupermarketsPanel(){
     {label:'Сільпо', match:['сільпо','silpo']},
   ];
 
-  const history = getAllHistoricalExpenses();
   const totals = CHAINS.map(chain=>{
-    const txs = history.filter(t=>{
+    const txs = all.filter(t=>{
       const d = t.desc.toLowerCase();
       return chain.match.some(m=>d.includes(m));
     });
-    return { label: chain.label, sum: txs.reduce((s,t)=>s+Math.abs(t.amount),0), count: txs.length };
+    return { label: chain.label, sum: txs.reduce((s,t)=>s+Math.abs(t.amount),0), count: txs.length, txs };
   });
   const grandTotal = totals.reduce((s,t)=>s+t.sum,0);
 
-  p.innerHTML = `<h2>Супермаркети</h2><p class="ms-hint">Скільки всього витрачено в кожній із цих мереж за весь час, що є в кеші (не лише за поточний період).</p><div id="supermarketRows"></div>`;
+  p.innerHTML = `<h2>Супермаркети</h2><p class="ms-hint">Скільки витрачено в кожній із цих мереж за поточний обраний період. Клікни на рядок, щоб побачити самі операції.</p><div id="supermarketRows"></div>`;
   const rowsWrap = p.querySelector('#supermarketRows');
   totals.forEach(t=>{
+    const expanded = !!state.expandedSupermarkets[t.label];
     const row = document.createElement('div');
-    row.className = 'ms-today-cat-row';
-    row.innerHTML = `<span class="ms-today-cat-name">${t.label}</span><span class="ms-today-cat-amt">${t.count} оп.</span><span class="ms-today-cat-amt" style="color:var(--gold);min-width:80px;text-align:right">${fmt(t.sum)} ${curSym()}</span>`;
+    row.className = 'ms-legend-row'+(t.count?' ms-legend-row-clickable':'');
+    row.innerHTML = `<span class="ms-legend-chevron">${t.count ? (expanded?'▾':'▸') : ''}</span>
+      <span class="ms-legend-cat">${t.label}</span>
+      <span class="ms-legend-amt">${t.count} оп.</span>
+      <span class="ms-legend-amt" style="color:var(--gold);min-width:80px;text-align:right">${fmt(t.sum)} ${curSym()}</span>`;
+    if(t.count){
+      row.addEventListener('click', ()=>{
+        state.expandedSupermarkets[t.label] = !state.expandedSupermarkets[t.label];
+        render();
+      });
+    }
     rowsWrap.appendChild(row);
+
+    if(expanded && t.count){
+      const detail = document.createElement('div');
+      detail.className = 'ms-legend-detail';
+      [...t.txs].sort((a,b)=>b.date-a.date).forEach(tx=>{
+        const dateStr = tx.date.toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'});
+        const dRow = document.createElement('div');
+        dRow.className = 'ms-legend-detail-row';
+        dRow.innerHTML = `<span style="min-width:40px;color:var(--muted)">${dateStr}</span><span style="flex:1">${escapeHtml(tx.desc)}</span><span class="ms-amt-neg">−${fmt(tx.amount)} ${curSym()}</span>`;
+        detail.appendChild(dRow);
+      });
+      rowsWrap.appendChild(detail);
+    }
   });
   if(grandTotal>0){
     const totalRow = document.createElement('div');
