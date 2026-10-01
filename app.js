@@ -534,7 +534,7 @@ function txKey(t){
   return `${d}|${t.desc}|${t.amount}`;
 }
 
-const INCOMING_SELF_KEYWORDS = ['From UAH account','Cancellation','Cashback withdrawal','Partial cash out','Top up'];
+const INCOMING_SELF_KEYWORDS = ['From UAH account','Cancellation','Скасування','Cashback withdrawal','Partial cash out','Top up'];
 
 function guessPersonName(desc){
   let d = desc.trim();
@@ -1381,17 +1381,22 @@ function resultsPanel(){
 
   const panel3 = document.createElement('div');
   panel3.className='ms-panel';
+  const MANUAL_CURRENCIES = [{code:980,label:'₴ UAH'},{code:978,label:'€ EUR'},{code:840,label:'$ USD'},{code:985,label:'zł PLN'},{code:946,label:'lei RON'},{code:981,label:'₾ GEL'}];
   panel3.innerHTML = `
     <h2>Додати готівкову витрату вручну</h2>
     <div class="ms-manual-form">
       <div class="ms-field" style="max-width:140px"><label>Дата</label><input type="date" id="mDate" value="${todayStr()}"></div>
       <div class="ms-field" style="flex:2"><label>Опис</label><input type="text" id="mDesc" placeholder="Наприклад: канцтовари"></div>
-      <div class="ms-field" style="max-width:120px"><label>Сума</label><input type="text" id="mAmount" placeholder="250"></div>
+      <div class="ms-field" style="max-width:110px"><label>Сума</label><input type="text" id="mAmount" placeholder="250"></div>
+      <div class="ms-field" style="max-width:100px"><label>Валюта</label>
+        <select id="mCurrency">${MANUAL_CURRENCIES.map(c=>`<option value="${c.code}">${c.label}</option>`).join('')}</select>
+      </div>
       <div class="ms-field" style="max-width:180px"><label>Категорія</label>
         <select id="mCat">${CATS.map(c=>`<option value="${c}">${c}</option>`).join('')}</select>
       </div>
       <button class="ms-btn" id="mAdd" style="align-self:flex-end">Додати</button>
     </div>
+    <p class="ms-hint" style="margin-top:6px">Якщо валюта не ₴ — сума одразу перераховується в гривні за приблизним курсом (тим самим, що й всюди в застосунку), щоб не ламати підрахунки в інших блоках.</p>
   `;
   panel3.querySelector('#mAdd').addEventListener('click', ()=>{
     const d = panel3.querySelector('#mDate').value;
@@ -1399,11 +1404,16 @@ function resultsPanel(){
     const amtRaw = panel3.querySelector('#mAmount').value;
     const amt = parseFloat(amtRaw.replace(',','.'));
     const cat = panel3.querySelector('#mCat').value;
+    const curCodeChosen = parseInt(panel3.querySelector('#mCurrency').value, 10);
     if(!desc || isNaN(amt)){
       alert(!desc ? 'Впиши опис витрати — без нього не зберігається.' : `Не розпізнала суму «${amtRaw}» — впиши число, наприклад 250 або 250.50.`);
       return;
     }
-    state.manual.push({date:d, desc, amount:-Math.abs(amt), cat});
+    // convert to UAH once, at entry time, so every other panel that sums manual
+    // entries doesn't need to know about currencies at all
+    const amtUah = curCodeChosen===980 ? amt : (amt*TO_EUR_RATE[curCodeChosen])/TO_EUR_RATE[980];
+    const descWithCur = curCodeChosen===980 ? desc : `${desc} (${fmt(amt)} ${MANUAL_CURRENCIES.find(c=>c.code===curCodeChosen).label.split(' ')[1]})`;
+    state.manual.push({date:d, desc:descWithCur, amount:-Math.abs(amtUah), cat});
     persistManual();
     panel3.querySelector('#mDesc').value = '';
     panel3.querySelector('#mAmount').value = '';
@@ -1545,6 +1555,12 @@ const RECURRING_PAYMENTS = [
   {label:'Orange', icon:'📱', match:['orange']},
   {label:'Vodafone', icon:'📶', match:['vodafone']},
   {label:'Claude', icon:'🤖', match:['claude']},
+  // "Apple" covers two separate subscriptions at different price points (iCloud
+  // storage vs an app) — split by approximate amount so they don't get mixed into
+  // one misleading reminder
+  {label:'Apple (iCloud)', icon:'☁️', match:['apple'], amountNear:0.99},
+  {label:'Apple (додаток)', icon:'🍎', match:['apple'], amountNear:7.49},
+  {label:'Google', icon:'🔍', match:['google']},
 ];
 function buildRecurringPaymentsPanel(){
   const p = document.createElement('div');
@@ -1554,7 +1570,10 @@ function buildRecurringPaymentsPanel(){
   const today = new Date(); today.setHours(0,0,0,0);
 
   const rows = RECURRING_PAYMENTS.map(rp=>{
-    const matches = history.filter(t=>rp.match.some(m=>t.desc.toLowerCase().includes(m)));
+    let matches = history.filter(t=>rp.match.some(m=>t.desc.toLowerCase().includes(m)));
+    if(rp.amountNear!==undefined){
+      matches = matches.filter(t=>Math.abs(Math.abs(t.amount)-rp.amountNear)<0.5);
+    }
     if(!matches.length) return null;
     const last = matches.reduce((a,b)=>a.date>b.date?a:b);
     const nextDue = new Date(last.date.getFullYear(), last.date.getMonth()+1, last.date.getDate());
