@@ -586,6 +586,13 @@ function addManualDebt(person, amount, date){
   render();
 }
 
+// Date + time for an actual transaction (not for date-range boundaries like trip
+// start/end or the period selector, which only ever have a date, no real time).
+function dtStr(d){
+  const datePart = d.toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'});
+  const timePart = d.toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'});
+  return `${datePart} ${timePart}`;
+}
 function fmt(n){
   return new Intl.NumberFormat('uk-UA',{minimumFractionDigits:2,maximumFractionDigits:2}).format(Math.abs(n));
 }
@@ -1049,6 +1056,12 @@ function buildDayTxList(label, list){
     const icon = document.createElement('span');
     icon.className = 'ms-legend-icon';
     icon.textContent = ICONS[t.cat] || '❓';
+    const time = document.createElement('span');
+    time.style.color = 'var(--muted)';
+    time.style.fontFamily = 'var(--font-mono)';
+    time.style.fontSize = '11px';
+    time.style.minWidth = '38px';
+    time.textContent = t.date.toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'});
     const name = document.createElement('span');
     name.className = 'ms-today-cat-name';
     name.textContent = t.desc;
@@ -1066,6 +1079,7 @@ function buildDayTxList(label, list){
     sel.addEventListener('change', e=>{ handleCategoryChange(t, e.target.value); });
     row.appendChild(chk);
     row.appendChild(icon);
+    row.appendChild(time);
     row.appendChild(name);
     row.appendChild(amt);
     row.appendChild(sel);
@@ -1112,9 +1126,22 @@ function resultsPanel(){
   });
   const all = expenses.concat(manualExpenses.map(m=>({date:new Date(m.date),desc:m.desc,amount:m.amount,cat:m.cat,manual:true})));
 
-  const total = all.reduce((s,t)=>s+t.amount,0);
   const byCat = {};
   all.forEach(t=>{ byCat[t.cat] = (byCat[t.cat]||0) + t.amount; });
+
+  // A "Скасування"/"Cancellation" refund is money coming back for something that was
+  // already counted as an expense in its category (e.g. a cancelled Bolt ride) — net
+  // it against that category's total instead of leaving the category looking like
+  // the ride still cost full price. Deliberately doesn't touch `all` itself (every
+  // other panel — the table, today, monthly chart — keeps working exactly as before).
+  const CANCELLATION_KEYWORDS = ['Скасування','Cancellation'];
+  const periodRefunds = activeTxs.filter(t=>t.amount>0 && CANCELLATION_KEYWORDS.some(k=>t.desc.includes(k)));
+  periodRefunds.forEach(r=>{
+    const cat = categoryFor(r);
+    byCat[cat] = (byCat[cat]||0) + r.amount; // amount is positive, reduces the (negative) category total toward zero
+  });
+
+  const total = Object.values(byCat).reduce((s,v)=>s+v,0);
   const catList = Object.entries(byCat).sort((a,b)=>a[1]-b[1]);
 
   const panelToday = buildTodayPanel(all);
@@ -1222,7 +1249,7 @@ function resultsPanel(){
         const note = state.notes[key];
         const dRow = document.createElement('div');
         dRow.className = 'ms-legend-detail-row';
-        const dateStr = t.date.toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'});
+        const dateStr = dtStr(t.date);
         dRow.innerHTML = `<span style="min-width:40px;color:var(--muted)">${dateStr}</span><span style="flex:1">${escapeHtml(t.desc)}</span><span class="ms-amt-neg">−${fmt(t.amount)} ${curSym()}</span>`;
         const noteBtn = document.createElement('button');
         noteBtn.className = 'ms-note-btn'+(note?' has-note':'');
@@ -1256,7 +1283,7 @@ function resultsPanel(){
   const tbody = panel2.querySelector('#txBody');
   all.sort((a,b)=>b.date-a.date).forEach(t=>{
     const tr = document.createElement('tr');
-    const dateStr = t.date.toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'});
+    const dateStr = dtStr(t.date);
     const key = txKey(t);
     const existingNote = state.notes[key];
     tr.dataset.search = (t.desc+' '+(existingNote||'')).toLowerCase();
@@ -1459,9 +1486,9 @@ function resultsPanel(){
   topRow.appendChild(panelToday);
   wrap.appendChild(topRow);
 
-  // two-column row: all transactions / incoming — each can expand downward in place
+  // two-column row: all transactions (2/3) / incoming (1/3) — each can expand downward in place
   const threeCol = document.createElement('div');
-  threeCol.className = 'ms-grid';
+  threeCol.className = 'ms-grid ms-grid-2-1';
   threeCol.style.marginBottom = '14px';
   threeCol.appendChild(panel2);
   threeCol.appendChild(panelIncoming);
@@ -1592,7 +1619,7 @@ function buildRecurringPaymentsPanel(){
     if(soon) row.style.background = 'rgba(184,92,74,0.08)';
     row.innerHTML = `
       <span class="ms-today-cat-name">${r.icon} ${r.label}</span>
-      <span class="ms-today-cat-amt" style="color:var(--muted)">останній: ${r.lastDate.toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'})}, ${fmt(r.lastAmt)}</span>
+      <span class="ms-today-cat-amt" style="color:var(--muted)">останній: ${dtStr(r.lastDate)}, ${fmt(r.lastAmt)}</span>
       <span class="ms-today-cat-amt" style="${soon?'color:var(--rust);font-weight:700':'color:var(--muted)'}">
         ${r.daysLeft<0 ? 'мабуть, вже сплачено' : (soon ? `⚠ через ${r.daysLeft} дн.` : `через ${r.daysLeft} дн.`)}
       </span>
@@ -1669,12 +1696,7 @@ function buildCleanExpensesPanel(all, grossTotal, periodDays){
 
   p.innerHTML = `
     <h2>Чисті трати</h2>
-    <p class="ms-hint">Тут враховані лише операції, не позначені як «не витрата» в таблиці «Всі операції» нижче (галочка в колонці «Чисто») — зручно для випадків на кшталт повернення й повторного списання за таксі чи квитки, або поповнення власної банки на щось (на кшталт «Фонд на машину»), яке не є реальною тратою.</p>
     <div class="ms-row" style="gap:20px;flex-wrap:wrap">
-      <div>
-        <div class="ms-hint" style="margin:0">Валовий підсумок (як у «Загальна картина»)</div>
-        <div class="ms-today-amt" style="font-size:20px">${fmt(grossSum)} ${curSym()}</div>
-      </div>
       <div>
         <div class="ms-hint" style="margin:0">Чисті трати</div>
         <div class="ms-today-amt" style="font-size:20px;color:var(--teal)">${fmt(cleanSum)} ${curSym()}</div>
@@ -1860,7 +1882,7 @@ function buildIncomingPanel(){
   visibleExternal.forEach(t=>{
     const row = document.createElement('div');
     row.className='ms-inc-row';
-    const dateStr = t.date.toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'});
+    const dateStr = dtStr(t.date);
     row.innerHTML = `<span style="min-width:44px">${dateStr}</span><span style="flex:1">${escapeHtml(t.desc)}</span><span class="ms-amt-pos">+${fmt(t.amount)} ${curSym()}</span>`;
     extList.appendChild(row);
   });
@@ -1879,7 +1901,7 @@ function buildIncomingPanel(){
       const row = document.createElement('div');
       row.className='ms-inc-row';
       row.style.opacity='.6';
-      const dateStr = t.date.toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'});
+      const dateStr = dtStr(t.date);
       row.innerHTML = `<span style="min-width:44px">${dateStr}</span><span style="flex:1">${escapeHtml(t.desc)}</span><span class="ms-amt-pos">+${fmt(t.amount)} ${curSym()}</span>`;
       intList.appendChild(row);
     });
@@ -2051,7 +2073,7 @@ function buildTripsPanel(all){
           groupHead.innerHTML = `<span class="ms-trip-pick-desc">${TRIP_GROUP_ICONS[g]} ${g}</span><span class="ms-trip-pick-amt">${fmt(groupSum)} ${curSym()}</span>`;
           scrollBox.appendChild(groupHead);
           groupTxs.forEach(t=>{
-            const dateStr = t.date.toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'});
+            const dateStr = dtStr(t.date);
             const row = document.createElement('div');
             row.className = 'ms-trip-pick-row';
             row.style.paddingLeft = '20px';
@@ -2207,7 +2229,7 @@ function buildDebtsPanel(){
     incoming.forEach(t=>{
       const row = document.createElement('div');
       row.className='ms-inc-row';
-      const dateStr = t.date instanceof Date ? t.date.toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'}) : t.date;
+      const dateStr = t.date instanceof Date ? dtStr(t.date) : t.date;
       row.innerHTML = `<span style="min-width:60px">${dateStr}</span><span style="flex:1">${escapeHtml(t.desc)}</span><span class="ms-amt-pos">+${fmt(t.amount)} ₴</span>`;
       if(openDebts.length){
         const sel = document.createElement('select');

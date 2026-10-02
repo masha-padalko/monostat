@@ -28,6 +28,7 @@
   }
   .ms-inner{width:100%;max-width:1320px;padding:0 20px;}
   .ms-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start;}
+  .ms-grid-2-1{grid-template-columns:3fr 1fr;}
   .ms-grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;align-items:start;}
   .ms-grid > *, .ms-grid3 > *{min-width:0;}
   .ms-grid .ms-panel, .ms-grid3 .ms-panel{margin-bottom:0;}
