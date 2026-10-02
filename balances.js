@@ -81,6 +81,18 @@
       const row = document.createElement('div');
       row.className = 'ms-source-row';
 
+      const enabledChk = document.createElement('input');
+      enabledChk.type = 'checkbox';
+      enabledChk.className = 'ms-source-enabled';
+      enabledChk.checked = src.enabled !== false; // undefined/missing (old saved sources) defaults to enabled
+      enabledChk.title = 'Враховувати в загальній сумі';
+      enabledChk.addEventListener('change', e => {
+        sources[i].enabled = e.target.checked;
+        setDirty(true);
+        renderSources(); // re-render so the row's dimmed/active look updates too
+        autoSave();
+      });
+
       const nameInput = document.createElement('input');
       nameInput.type = 'text';
       nameInput.value = src.name;
@@ -131,6 +143,8 @@
         updateTotals();
       });
 
+      if(src.enabled===false) row.style.opacity = '.45';
+      row.appendChild(enabledChk);
       row.appendChild(nameInput);
       row.appendChild(amountInput);
       row.appendChild(curSelect);
@@ -150,13 +164,16 @@
       const amount = parseAmount(src.amount);
       const cur = CUR_BY_CODE[src.currency] || CUR_BY_CODE.UAH;
       const eurValue = amount * cur.toEur;
-      totalEur += eurValue;
-      byCurrency[src.currency] = (byCurrency[src.currency] || 0) + amount;
+      const isEnabled = src.enabled !== false;
+      if(isEnabled){
+        totalEur += eurValue;
+        byCurrency[src.currency] = (byCurrency[src.currency] || 0) + amount;
+      }
 
       const row = rows[i];
       if(row){
         const eurLabel = row.querySelector('.ms-source-eur');
-        if(eurLabel) eurLabel.textContent = amount ? `≈ € ${fmtNum.format(eurValue)}` : '';
+        if(eurLabel) eurLabel.textContent = amount ? `${isEnabled?'':'(вимкнено) '}≈ € ${fmtNum.format(eurValue)}` : '';
       }
     });
 

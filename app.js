@@ -534,7 +534,7 @@ function txKey(t){
   return `${d}|${t.desc}|${t.amount}`;
 }
 
-const INCOMING_SELF_KEYWORDS = ['From UAH account','Cancellation','Скасування','Cashback withdrawal','Partial cash out','Top up'];
+const INCOMING_SELF_KEYWORDS = ['From UAH account','Cancellation','Скасування','Cashback withdrawal','Partial cash out','Top up','Bolt','Uber','Uklon'];
 
 function guessPersonName(desc){
   let d = desc.trim();
@@ -591,7 +591,7 @@ function addManualDebt(person, amount, date){
 function dtStr(d){
   const datePart = d.toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'});
   const timePart = d.toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'});
-  return `${datePart} ${timePart}`;
+  return `<b>${datePart}</b> ${timePart}`;
 }
 function fmt(n){
   return new Intl.NumberFormat('uk-UA',{minimumFractionDigits:2,maximumFractionDigits:2}).format(Math.abs(n));
@@ -1135,7 +1135,14 @@ function resultsPanel(){
   // the ride still cost full price. Deliberately doesn't touch `all` itself (every
   // other panel — the table, today, monthly chart — keeps working exactly as before).
   const CANCELLATION_KEYWORDS = ['Скасування','Cancellation'];
-  const periodRefunds = activeTxs.filter(t=>t.amount>0 && CANCELLATION_KEYWORDS.some(k=>t.desc.includes(k)));
+  // Bolt/Uber/Uklon sometimes refund the full amount and re-charge a corrected price
+  // (e.g. route turned out a bit pricier) without the word "Скасування" at all — any
+  // money coming back FROM these specific apps is still always a refund, never real income
+  const REFUND_PRONE_MERCHANTS = ['bolt','uber','uklon'];
+  const periodRefunds = activeTxs.filter(t=>t.amount>0 && (
+    CANCELLATION_KEYWORDS.some(k=>t.desc.includes(k)) ||
+    REFUND_PRONE_MERCHANTS.some(m=>t.desc.toLowerCase().includes(m))
+  ));
   periodRefunds.forEach(r=>{
     const cat = categoryFor(r);
     byCat[cat] = (byCat[cat]||0) + r.amount; // amount is positive, reduces the (negative) category total toward zero
@@ -1223,11 +1230,13 @@ function resultsPanel(){
   const legend = panel1.querySelector('#legendWrap');
   const byCatTx = {};
   all.forEach(t=>{ (byCatTx[t.cat] = byCatTx[t.cat]||[]).push(t); });
+  const refundsByCat = {};
+  periodRefunds.forEach(r=>{ const c = categoryFor(r); (refundsByCat[c] = refundsByCat[c]||[]).push(r); });
 
   catList.forEach(([cat,sum])=>{
     const row = document.createElement('div');
     row.className='ms-legend-row ms-legend-row-clickable';
-    const pct = ((Math.abs(sum)/Math.abs(total))*100).toFixed(1);
+    const pct = total ? ((Math.abs(sum)/Math.abs(total))*100).toFixed(1) : '0.0';
     const expanded = !!state.expandedCats[cat];
     row.innerHTML = `<span class="ms-legend-chevron">${expanded?'▾':'▸'}</span>
       <span class="ms-dot" style="background:${COLORS[cat]||'#666'}"></span>
@@ -1266,6 +1275,14 @@ function resultsPanel(){
           detail.appendChild(noteP);
         }
       });
+      // show the refunds netted into this category's total, so the math is visible
+      // instead of just trusting the smaller final number
+      (refundsByCat[cat]||[]).sort((a,b)=>b.date-a.date).forEach(r=>{
+        const rRow = document.createElement('div');
+        rRow.className = 'ms-legend-detail-row';
+        rRow.innerHTML = `<span style="min-width:40px;color:var(--muted)">${dtStr(r.date)}</span><span style="flex:1;color:var(--teal)">↩ ${escapeHtml(r.desc)} (повернення)</span><span style="color:var(--teal)">+${fmt(r.amount)} ${curSym()}</span>`;
+        detail.appendChild(rRow);
+      });
       legend.appendChild(detail);
     }
   });
@@ -1281,6 +1298,7 @@ function resultsPanel(){
     <div style="font-size:13px;color:var(--muted);margin-bottom:12px" id="txSearchSummary">Разом витрачено: <b style="color:var(--gold);font-family:var(--font-mono)">${fmt(total)} ${curSym()}</b>${fmtEur(total, curCode())} · ${all.length} операцій</div>
     <div class="ms-table-wrap"><table class="ms-tx"><thead><tr><th>Дата</th><th>Опис</th><th>Категорія</th><th>Поїздка</th><th title="Не витрата">Чисто</th><th style="text-align:right">Сума</th></tr></thead><tbody id="txBody"></tbody></table></div>`;
   const tbody = panel2.querySelector('#txBody');
+  let prevDayKey = null;
   all.sort((a,b)=>b.date-a.date).forEach(t=>{
     const tr = document.createElement('tr');
     const dateStr = dtStr(t.date);
@@ -1289,6 +1307,10 @@ function resultsPanel(){
     tr.dataset.search = (t.desc+' '+(existingNote||'')).toLowerCase();
     const isNotExpense = !!state.notExpense[key];
     if(isNotExpense) tr.style.opacity = '.45';
+
+    const dayKey = todayStr(t.date);
+    if(prevDayKey!==null && dayKey!==prevDayKey) tr.classList.add('ms-day-border');
+    prevDayKey = dayKey;
 
     const sel = document.createElement('select');
     sel.className='ms-cat-select';
@@ -1580,13 +1602,11 @@ function buildCategoryGroupTilesPanel(all){
 // honest, actually-deliverable version of "remind me".
 const RECURRING_PAYMENTS = [
   {label:'Orange', icon:'📱', match:['orange']},
-  {label:'Vodafone', icon:'📶', match:['vodafone']},
+  // amounts vary month to month (155-310) depending on what she tops up, but a
+  // short-term internet package (e.g. 75) isn't the monthly cycle payment at all —
+  // a floor well above that filters those out without needing an exact amount match
+  {label:'Vodafone', icon:'📶', match:['vodafone'], minAmount:100},
   {label:'Claude', icon:'🤖', match:['claude']},
-  // "Apple" covers two separate subscriptions at different price points (iCloud
-  // storage vs an app) — split by approximate amount so they don't get mixed into
-  // one misleading reminder
-  {label:'Apple (iCloud)', icon:'☁️', match:['apple'], amountNear:0.99},
-  {label:'Apple (додаток)', icon:'🍎', match:['apple'], amountNear:7.49},
   {label:'Google', icon:'🔍', match:['google']},
 ];
 function buildRecurringPaymentsPanel(){
@@ -1601,12 +1621,35 @@ function buildRecurringPaymentsPanel(){
     if(rp.amountNear!==undefined){
       matches = matches.filter(t=>Math.abs(Math.abs(t.amount)-rp.amountNear)<0.5);
     }
+    if(rp.minAmount!==undefined){
+      matches = matches.filter(t=>Math.abs(t.amount)>=rp.minAmount);
+    }
     if(!matches.length) return null;
     const last = matches.reduce((a,b)=>a.date>b.date?a:b);
     const nextDue = new Date(last.date.getFullYear(), last.date.getMonth()+1, last.date.getDate());
     const daysLeft = Math.round((nextDue.getTime()-today.getTime())/(24*60*60*1000));
     return { label:rp.label, icon:rp.icon, lastAmt:Math.abs(last.amount), lastDate:last.date, nextDue, daysLeft };
   }).filter(Boolean);
+
+  // "Apple" bills multiple separate subscriptions at different, currency-specific
+  // amounts (iCloud, individual apps, etc.) — rather than hand-maintaining every
+  // amount she happens to notice, group every Apple charge by its exact amount+currency
+  // and treat anything that's recurred at least twice as its own tracked subscription.
+  const appleTxs = history.filter(t=>t.desc.toLowerCase().includes('apple'));
+  const appleGroups = {};
+  appleTxs.forEach(t=>{
+    const k = `${t.currency}_${Math.abs(t.amount).toFixed(2)}`;
+    (appleGroups[k] = appleGroups[k]||[]).push(t);
+  });
+  const CUR_SYMBOLS = {980:'₴',978:'€',840:'$',985:'zł',946:'lei',981:'₾'};
+  Object.values(appleGroups).forEach(group=>{
+    if(group.length<2) return; // seen only once so far — not confirmed recurring yet
+    const last = group.reduce((a,b)=>a.date>b.date?a:b);
+    const nextDue = new Date(last.date.getFullYear(), last.date.getMonth()+1, last.date.getDate());
+    const daysLeft = Math.round((nextDue.getTime()-today.getTime())/(24*60*60*1000));
+    const sym = CUR_SYMBOLS[last.currency] || '';
+    rows.push({ label:`Apple (${fmt(Math.abs(last.amount))} ${sym})`, icon:'🍎', lastAmt:Math.abs(last.amount), lastDate:last.date, nextDue, daysLeft });
+  });
 
   if(!rows.length){ p.innerHTML=''; return p; }
 
@@ -1621,7 +1664,7 @@ function buildRecurringPaymentsPanel(){
       <span class="ms-today-cat-name">${r.icon} ${r.label}</span>
       <span class="ms-today-cat-amt" style="color:var(--muted)">останній: ${dtStr(r.lastDate)}, ${fmt(r.lastAmt)}</span>
       <span class="ms-today-cat-amt" style="${soon?'color:var(--rust);font-weight:700':'color:var(--muted)'}">
-        ${r.daysLeft<0 ? 'мабуть, вже сплачено' : (soon ? `⚠ через ${r.daysLeft} дн.` : `через ${r.daysLeft} дн.`)}
+        ${r.daysLeft<0 ? `⚠ просрочено на ${-r.daysLeft} дн.` : (soon ? `⚠ через ${r.daysLeft} дн.` : `через ${r.daysLeft} дн.`)}
       </span>
     `;
     wrap.appendChild(row);
