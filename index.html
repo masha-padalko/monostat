@@ -5,13 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>MonoStat — особиста статистика Monobank</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext x='50' y='72' font-size='72' text-anchor='middle'%3E%F0%9F%92%B8%3C/text%3E%3C/svg%3E">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
   <!--
     MonoStat — персональний фінансовий трекер на базі Monobank Open API.
     Файлова структура проєкту:
-      index.html   — цей файл: статична шапка/підвал + підключення style.css / data.js / app.js
+      index.html   — цей файл: статична шапка/підвал + підключення css/style.css / js/data.js / js/app.js
       style.css    — всі стилі та кольорові токени
       data.js      — "запечені" дефолти (зараз порожні — реальні дані живуть у Supabase)
       app.js       — вся логіка застосунку: підключення до API, категоризація,
@@ -40,12 +40,12 @@
 
       <div id="app"></div>
 
-      <div class="ms-footer-note">Дані завантажуються напряму з api.monobank.ua у твоєму браузері й нікуди більше не надсилаються. Категорії, які ти виправляєш, і ручні записи зберігаються окремо від токена.</div>
+      <div class="ms-footer-note">Виписка завантажується напряму з api.monobank.ua у твоєму браузері. Токен Monobank зберігається лише в браузері. Категорії, нотатки, поїздки й ручні записи синхронізуються з твоїм акаунтом у базі (Supabase) і доступні лише тобі.</div>
     </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="data.js"></script>
-  <script src="app.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/app.js"></script>
 </body>
 </html>

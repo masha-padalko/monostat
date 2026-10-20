@@ -160,6 +160,7 @@ let state = {
   editingTripDates: null, // tripId whose inline date-picker form is currently open, or null
   authChecking: true, // true only during the very first initAuth() check — avoids flashing the login form before we know a session already exists
   useCache: true, // whether to merge cached historical periods in alongside the freshly fetched range
+  viewRange: null, // {start:Date,end:Date(inclusive)} when a monthly-chart cycle was clicked (viewTab==='previous')
   viewTab: 'current', // 'current' | 'previous' — which period tab is showing in the results view
   trips: [],          // [{id, name}] — named trips she can tag transactions with
   tripOf: {},          // txKey -> tripId
@@ -387,9 +388,24 @@ async function setTripDates(tripId, dateFrom, dateTo){
   render();
   await persistTrips();
 }
+// Trip of a transaction: an explicit choice wins ('none' = manually removed from any trip);
+// otherwise it falls into the trip whose dates cover its (local) day. Narrowest range wins on overlap.
+function tripIdFor(t){
+  const v = state.tripOf[txKey(t)];
+  if(v === 'none') return '';
+  if(v) return state.trips.some(x=>x.id===v) ? v : '';
+  const day = todayStr(t.date);
+  let best = null, bestLen = Infinity;
+  state.trips.forEach(tr=>{
+    if(tr.dateFrom && tr.dateTo && day>=tr.dateFrom && day<=tr.dateTo){
+      const len = new Date(tr.dateTo)-new Date(tr.dateFrom);
+      if(len<bestLen){ best=tr; bestLen=len; }
+    }
+  });
+  return best ? best.id : '';
+}
 async function assignTrip(key, tripId){
-  if(!tripId) delete state.tripOf[key];
-  else state.tripOf[key] = tripId;
+  state.tripOf[key] = tripId || 'none';
   render();
   await persistTrips();
 }
@@ -535,6 +551,10 @@ function txKey(t){
 }
 
 const INCOMING_SELF_KEYWORDS = ['From UAH account','Cancellation','Скасування','Cashback withdrawal','Partial cash out','Top up','Bolt','Uber','Uklon'];
+// Shared between Загальна картина and Подорожі netting — any positive amount matching
+// these is a refund for something already counted as an expense, never real income.
+const CANCELLATION_KEYWORDS_GLOBAL = ['Скасування','Cancellation'];
+const REFUND_PRONE_MERCHANTS_GLOBAL = ['bolt','uber','uklon'];
 
 function guessPersonName(desc){
   let d = desc.trim();
@@ -726,7 +746,13 @@ async function handleFetchStatement(){
 function mapRawItem(it){
   return {
     id: it.id, date: new Date(it.time*1000), desc: (it.description||'(без опису)').trim(),
-    mcc: it.mcc, amount: it.amount/100, currency: it.currencyCode
+    mcc: it.mcc, amount: it.amount/100, currency: it.currencyCode,
+    // `amount` is always in the ACCOUNT's currency (UAH for her card) — `operationAmount`
+    // is the true figure in whatever currency the operation actually happened in
+    // (`currency` describes THIS, not `amount`). Needed for e.g. grouping a foreign
+    // subscription by its stable original price instead of its UAH-equivalent, which
+    // drifts slightly with the exchange rate from charge to charge.
+    operationAmount: it.operationAmount!==undefined ? it.operationAmount/100 : it.amount/100
   };
 }
 function ingestTransactions(items){
@@ -750,6 +776,7 @@ function getAllHistoricalExpenses(){
 // Previous-month tab reads straight from the local cache — no API call. If that month
 // was never fetched before, the cache simply won't have it (shown as an empty state).
 function getPrevMonthRange(){
+  if(state.viewRange) return {start:new Date(state.viewRange.start), end:new Date(state.viewRange.end)};
   // aligned to her actual budgeting cycle — ends ON the 10th itself (state.from), starts
   // exactly one month earlier
   const base = state.from ? new Date(state.from+'T00:00:00') : new Date();
@@ -973,12 +1000,12 @@ function rangePanel(){
     </div>
     <div class="ms-row" style="margin-top:10px;gap:8px">
       <button class="ms-btn${state.viewTab==='current'?'':' secondary'}" id="tabCurrent" style="flex:1">Поточний період</button>
-      <button class="ms-btn${state.viewTab==='previous'?'':' secondary'}" id="tabPrevious" style="flex:1">Попередній місяць (${prevLabel})${prevCount?' · '+prevCount+' оп. в кеші':' · немає в кеші'}</button>
+      <button class="ms-btn${state.viewTab==='previous'?'':' secondary'}" id="tabPrevious" style="flex:1">${state.viewRange?'Цикл':'Попередній місяць'} (${prevLabel})${prevCount?' · '+prevCount+' оп. в кеші':' · немає в кеші'}</button>
     </div>
   `;
   p.querySelector('#backBtn').addEventListener('click', ()=>{state.step='accounts'; render();});
-  p.querySelector('#tabCurrent').addEventListener('click', ()=>{state.viewTab='current'; render();});
-  p.querySelector('#tabPrevious').addEventListener('click', ()=>{state.viewTab='previous'; render();});
+  p.querySelector('#tabCurrent').addEventListener('click', ()=>{state.viewTab='current'; state.viewRange=null; render();});
+  p.querySelector('#tabPrevious').addEventListener('click', ()=>{state.viewTab='previous'; state.viewRange=null; render();});
   return p;
 }
 
@@ -1134,14 +1161,9 @@ function resultsPanel(){
   // it against that category's total instead of leaving the category looking like
   // the ride still cost full price. Deliberately doesn't touch `all` itself (every
   // other panel — the table, today, monthly chart — keeps working exactly as before).
-  const CANCELLATION_KEYWORDS = ['Скасування','Cancellation'];
-  // Bolt/Uber/Uklon sometimes refund the full amount and re-charge a corrected price
-  // (e.g. route turned out a bit pricier) without the word "Скасування" at all — any
-  // money coming back FROM these specific apps is still always a refund, never real income
-  const REFUND_PRONE_MERCHANTS = ['bolt','uber','uklon'];
   const periodRefunds = activeTxs.filter(t=>t.amount>0 && (
-    CANCELLATION_KEYWORDS.some(k=>t.desc.includes(k)) ||
-    REFUND_PRONE_MERCHANTS.some(m=>t.desc.toLowerCase().includes(m))
+    CANCELLATION_KEYWORDS_GLOBAL.some(k=>t.desc.includes(k)) ||
+    REFUND_PRONE_MERCHANTS_GLOBAL.some(m=>t.desc.toLowerCase().includes(m))
   ));
   periodRefunds.forEach(r=>{
     const cat = categoryFor(r);
@@ -1177,7 +1199,7 @@ function resultsPanel(){
   const tripSpendByTrip = {};
   const tripCurrencySpend = {};
   all.forEach(t=>{
-    const tid = state.tripOf[txKey(t)];
+    const tid = tripIdFor(t);
     if(!tid) return;
     tripSpendByTrip[tid] = (tripSpendByTrip[tid]||0) + Math.abs(t.amount);
     if(t.currency && t.currency!==980){
@@ -1363,7 +1385,7 @@ function resultsPanel(){
       state.trips.forEach(tr2=>{
         const opt = document.createElement('option');
         opt.value = tr2.id; opt.textContent = tr2.name;
-        if(state.tripOf[key]===tr2.id) opt.selected = true;
+        if(tripIdFor(t)===tr2.id) opt.selected = true;
         tripSel.appendChild(opt);
       });
       tripSel.addEventListener('change', e=>{ assignTrip(key, e.target.value); });
@@ -1533,11 +1555,6 @@ function resultsPanel(){
   panelRecurring.style.marginBottom = '14px';
   wrap.appendChild(panelRecurring);
 
-  // big tile-style grouped categories (авто+бензин, здоров'я, подорожі)
-  const panelGroupTiles = buildCategoryGroupTilesPanel(all);
-  panelGroupTiles.style.marginBottom = '14px';
-  wrap.appendChild(panelGroupTiles);
-
   // monthly comparison bar chart — full history, own full-width row
   const panelMonthly = buildMonthlyBarChart();
   panelMonthly.style.marginBottom = '14px';
@@ -1557,42 +1574,6 @@ function resultsPanel(){
 // last 6 months, most recent on the right, so she can see at a glance whether this
 // month is running higher or lower than her usual pace. No charting library needed,
 // consistent with the rest of the app's plain-CSS visuals.
-// Groups a few related categories into single big tiles — авто+бензин, здоров'я
-// (лекарства+анализи+Врачи), подорожі (усі "Путешествия..." категорії) — everything
-// else stays exactly as it already is elsewhere (donut/legend/table), this is purely
-// an additional, coarser view for these specific groups.
-const CATEGORY_GROUPS = [
-  {label:'Авто', icon:'🚗', cats:['авто','бензин']},
-  {label:'Здоров\'я', icon:'🏥', cats:['лекарства','анализи','Врачи']},
-  {label:'Подорожі', icon:'🧳', cats: null, matchPrefix:'Путешествия'}, // matched dynamically below
-];
-function buildCategoryGroupTilesPanel(all){
-  const p = document.createElement('div');
-  p.className = 'ms-panel';
-
-  const tiles = CATEGORY_GROUPS.map(g=>{
-    const txs = all.filter(t=>{
-      if(g.matchPrefix) return t.cat && (t.cat.startsWith(g.matchPrefix) || t.cat==='Путешествия - жилье');
-      return g.cats.includes(t.cat);
-    });
-    return { ...g, sum: txs.reduce((s,t)=>s+Math.abs(t.amount),0), count: txs.length };
-  });
-
-  p.innerHTML = `<h2>Групи категорій</h2><div class="ms-tile-grid"></div>`;
-  const grid = p.querySelector('.ms-tile-grid');
-  tiles.forEach(t=>{
-    const tile = document.createElement('div');
-    tile.className = 'ms-cat-tile';
-    tile.innerHTML = `
-      <div class="ms-cat-tile-icon">${t.icon}</div>
-      <div class="ms-cat-tile-label">${t.label}</div>
-      <div class="ms-cat-tile-sum">${fmt(t.sum)} ${curSym()}</div>
-      <div class="ms-cat-tile-count">${t.count} оп.</div>
-    `;
-    grid.appendChild(tile);
-  });
-  return p;
-}
 
 // Known recurring subscriptions/bills, detected from the cache by keyword. Since a
 // real background push notification needs a server (this app has none — it's a
@@ -1638,7 +1619,9 @@ function buildRecurringPaymentsPanel(){
   const appleTxs = history.filter(t=>t.desc.toLowerCase().includes('apple'));
   const appleGroups = {};
   appleTxs.forEach(t=>{
-    const k = `${t.currency}_${Math.abs(t.amount).toFixed(2)}`;
+    // group by the ORIGINAL currency+price (stable month to month), not the UAH
+    // equivalent (which drifts slightly with the exchange rate on each charge date)
+    const k = `${t.currency}_${Math.abs(t.operationAmount).toFixed(2)}`;
     (appleGroups[k] = appleGroups[k]||[]).push(t);
   });
   const CUR_SYMBOLS = {980:'₴',978:'€',840:'$',985:'zł',946:'lei',981:'₾'};
@@ -1647,8 +1630,12 @@ function buildRecurringPaymentsPanel(){
     const last = group.reduce((a,b)=>a.date>b.date?a:b);
     const nextDue = new Date(last.date.getFullYear(), last.date.getMonth()+1, last.date.getDate());
     const daysLeft = Math.round((nextDue.getTime()-today.getTime())/(24*60*60*1000));
-    const sym = CUR_SYMBOLS[last.currency] || '';
-    rows.push({ label:`Apple (${fmt(Math.abs(last.amount))} ${sym})`, icon:'🍎', lastAmt:Math.abs(last.amount), lastDate:last.date, nextDue, daysLeft });
+    // `amount` (always UAH) is what actually left her account — show that, labeled ₴,
+    // same convention as every other figure in the app. The original currency/price is
+    // just mentioned alongside for context, never used as if it labeled `amount` itself.
+    const opSym = CUR_SYMBOLS[last.currency] || '';
+    const origNote = last.currency!==980 ? ` · ${fmt(Math.abs(last.operationAmount))} ${opSym}` : '';
+    rows.push({ label:`Apple (${fmt(Math.abs(last.amount))} ₴${origNote})`, icon:'🍎', lastAmt:Math.abs(last.amount), lastDate:last.date, nextDue, daysLeft });
   });
 
   if(!rows.length){ p.innerHTML=''; return p; }
@@ -1697,6 +1684,7 @@ function buildMonthlyBarChart(){
     cycles.push({
       label: start.toLocaleDateString('uk-UA',{month:'short'}),
       sum,
+      start, end,
       isCurrent: i===5
     });
   }
@@ -1704,7 +1692,7 @@ function buildMonthlyBarChart(){
 
   p.innerHTML = `
     <h2>Витрати за місяцями</h2>
-    <p class="ms-hint">Останні 6 платіжних циклів (10-те до 10-го, як і всюди в застосунку) — щоб порівнювати темп саме між зарплатами, а не за календарем.</p>
+    <p class="ms-hint">Останні 6 платіжних циклів (10-те до 10-го, як і всюди в застосунку) — щоб порівнювати темп саме між зарплатами, а не за календарем. Натисни на стовпчик — відкриється повна статистика за цей цикл.</p>
     <div class="ms-bars"></div>
   `;
   const barsWrap = p.querySelector('.ms-bars');
@@ -1717,6 +1705,25 @@ function buildMonthlyBarChart(){
       <div class="ms-bar-track"><div class="ms-bar-fill${m.isCurrent?' ms-bar-fill-current':''}" style="height:${heightPct}%"></div></div>
       <div class="ms-bar-label${m.isCurrent?' ms-bar-label-current':''}">${m.label}</div>
     `;
+    // click → open full stats for this cycle (from local cache only, no API call)
+    col.classList.add('ms-bar-clickable');
+    col.tabIndex = 0;
+    col.setAttribute('role','button');
+    const rangeTxt = `${m.start.toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'})} – ${new Date(m.end.getTime()-86400000).toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'})}`;
+    col.setAttribute('aria-label', `Відкрити статистику за цикл ${rangeTxt}`);
+    col.title = `Відкрити статистику: ${rangeTxt}`;
+    const open = ()=>{
+      if(m.isCurrent){ state.viewTab='current'; state.viewRange=null; }
+      else{
+        const endIncl = new Date(m.end.getFullYear(), m.end.getMonth(), m.end.getDate()-1);
+        state.viewTab='previous';
+        state.viewRange = {start:new Date(m.start), end:endIncl};
+      }
+      render();
+      window.scrollTo({top:0, behavior:'smooth'});
+    };
+    col.addEventListener('click', open);
+    col.addEventListener('keydown', e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); open(); } });
     barsWrap.appendChild(col);
   });
   return p;
@@ -1976,7 +1983,7 @@ function buildTripsPanel(all){
   p.className = 'ms-panel ms-trips-panel';
   p.innerHTML = `
     <h2>🧳 Подорожі — окремий облік витрат по поїздках</h2>
-    <p class="ms-hint">Створи поїздку тут, а сам зв'язок з операціями роби у колонці «Поїздка» в таблиці «Всі операції» вище — обери там потрібну поїздку у випадаючому списку конкретної покупки. Тут — тільки підсумок по кожній поїздці.</p>
+    <p class="ms-hint">Створи поїздку й задай її дати (✎ біля поїздки) — усі операції за ці дати потраплять сюди автоматично. Якщо якась покупка не стосується поїздки, обери «—» у колонці «Поїздка» в таблиці «Всі операції». Без дат зв'язок робиться вручну в тій самій колонці.</p>
     <div class="ms-manual-form">
       <div class="ms-field" style="flex:2"><label>Назва поїздки</label><input type="text" id="tripName" placeholder="Наприклад: Польща, липень"></div>
       <button class="ms-btn" id="tripAdd" style="align-self:flex-end">Створити поїздку</button>
@@ -1988,17 +1995,18 @@ function buildTripsPanel(all){
     list.innerHTML = '<p class="ms-hint" style="margin:0">Поїздок ще немає — створи першу вище.</p>';
   }
   state.trips.forEach(trip=>{
-    const txs = all.filter(t=>state.tripOf[txKey(t)]===trip.id);
-    const sum = txs.reduce((s,t)=>s+Math.abs(t.amount),0);
+    const txs = all.filter(t=>tripIdFor(t)===trip.id);
     const expanded = !!state.expandedTrips?.[trip.id];
 
     let dateRangeStr = '';
     let dayCount = 0;
+    let tripMinD = null, tripMaxD = null; // exposed for refund-matching below
     const fmtD = d=>d.toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'});
     if(trip.dateFrom && trip.dateTo){
       // manually set — takes priority over any automatic guess
       const minD = new Date(trip.dateFrom+'T00:00:00');
-      const maxD = new Date(trip.dateTo+'T00:00:00');
+      const maxD = new Date(trip.dateTo+'T23:59:59');
+      tripMinD = minD; tripMaxD = maxD;
       dateRangeStr = trip.dateFrom===trip.dateTo ? fmtD(minD) : `${fmtD(minD)} – ${fmtD(maxD)}`;
       dayCount = Math.round((maxD.getTime() - minD.getTime())/(24*60*60*1000)) + 1;
     }else{
@@ -2012,10 +2020,32 @@ function buildTripsPanel(all){
         const dates = dateSourceTxs.map(t=>t.date.getTime());
         const minD = new Date(Math.min(...dates));
         const maxD = new Date(Math.max(...dates));
+        tripMinD = new Date(minD.toDateString());
+        tripMaxD = new Date(maxD.toDateString()+' 23:59:59');
         dateRangeStr = minD.toDateString()===maxD.toDateString() ? fmtD(minD) : `${fmtD(minD)} – ${fmtD(maxD)}`;
         dayCount = Math.round((new Date(maxD.toDateString()).getTime() - new Date(minD.toDateString()).getTime())/(24*60*60*1000)) + 1;
       }
     }
+
+    // Refunds (Скасування/Bolt/Uber/Uklon) never get tagged to a trip directly (they're
+    // positive amounts, not shown in "Всі операції" at all) — find any that fall within
+    // this trip's date range and net them against the matching category, same logic as
+    // the Загальна картина netting above.
+    const allRaw = state.txCache.map(mapRawItem); // unfiltered — need the positive (refund) transactions too, unlike getAllHistoricalExpenses()
+    const tripRefunds = (tripMinD && tripMaxD) ? allRaw.filter(t=>
+      t.amount>0 && t.date>=tripMinD && t.date<=tripMaxD &&
+      (CANCELLATION_KEYWORDS_GLOBAL.some(k=>t.desc.includes(k)) || REFUND_PRONE_MERCHANTS_GLOBAL.some(m=>t.desc.toLowerCase().includes(m)))
+    ) : [];
+
+    // exact-category breakdown (not just the 4 broad groups) with refunds netted in,
+    // so e.g. "такси" genuinely reflects what the rides cost after cancellations
+    const byExactCat = {};
+    txs.forEach(t=>{ byExactCat[t.cat] = (byExactCat[t.cat]||0) + Math.abs(t.amount); });
+    tripRefunds.forEach(r=>{
+      const rCat = categoryFor(r);
+      byExactCat[rCat] = (byExactCat[rCat]||0) - r.amount; // reduce toward zero
+    });
+    const sum = Object.values(byExactCat).reduce((s,v)=>s+v,0);
 
     const card = document.createElement('div');
     card.className = 'ms-trip-card';
@@ -2098,29 +2128,33 @@ function buildTripsPanel(all){
       if(txs.length===0){
         detailWrap.innerHTML = '<p class="ms-hint" style="margin:10px 0">Ще нічого не прив\'язано — познач операції в «Всі операції» вище.</p>';
       }else{
-        detailWrap.innerHTML = `<p class="ms-hint" style="margin:10px 0">Згруповано за типом витрати (щоб прибрати операцію — онови її поїздку на «—» в «Всі операції»):</p>`;
-        const byGroup = {};
-        txs.forEach(t=>{
-          const g = tripGroupFor(t.cat);
-          (byGroup[g] = byGroup[g]||[]).push(t);
-        });
+        detailWrap.innerHTML = `<p class="ms-hint" style="margin:10px 0">Згруповано за точною категорією, суми враховують повернення (щоб прибрати операцію — онови її поїздку на «—» в «Всі операції»):</p>`;
+        const byCatTxs = {};
+        txs.forEach(t=>{ (byCatTxs[t.cat] = byCatTxs[t.cat]||[]).push(t); });
+        const refundsByExactCat = {};
+        tripRefunds.forEach(r=>{ const c = categoryFor(r); (refundsByExactCat[c] = refundsByExactCat[c]||[]).push(r); });
+
         const scrollBox = document.createElement('div');
         scrollBox.className = 'ms-trip-scroll';
-        TRIP_GROUP_ORDER.filter(g=>byGroup[g]).forEach(g=>{
-          const groupTxs = byGroup[g].sort((a,b)=>b.date-a.date);
-          const groupSum = groupTxs.reduce((s,t)=>s+Math.abs(t.amount),0);
-          const groupHead = document.createElement('div');
-          groupHead.className = 'ms-trip-pick-row';
-          groupHead.style.fontWeight = '600';
-          groupHead.style.background = 'var(--panel-hi)';
-          groupHead.innerHTML = `<span class="ms-trip-pick-desc">${TRIP_GROUP_ICONS[g]} ${g}</span><span class="ms-trip-pick-amt">${fmt(groupSum)} ${curSym()}</span>`;
-          scrollBox.appendChild(groupHead);
-          groupTxs.forEach(t=>{
-            const dateStr = dtStr(t.date);
+        Object.keys(byExactCat).sort((a,b)=>byExactCat[b]-byExactCat[a]).forEach(cat=>{
+          const catHead = document.createElement('div');
+          catHead.className = 'ms-trip-pick-row';
+          catHead.style.fontWeight = '600';
+          catHead.style.background = 'var(--panel-hi)';
+          catHead.innerHTML = `<span class="ms-trip-pick-desc">${ICONS[cat]||'❓'} ${cat}</span><span class="ms-trip-pick-amt">${fmt(byExactCat[cat])} ${curSym()}</span>`;
+          scrollBox.appendChild(catHead);
+          (byCatTxs[cat]||[]).sort((a,b)=>b.date-a.date).forEach(t=>{
             const row = document.createElement('div');
             row.className = 'ms-trip-pick-row';
             row.style.paddingLeft = '20px';
-            row.innerHTML = `<span class="ms-trip-pick-desc">${dateStr} · ${escapeHtml(t.desc)}</span><span class="ms-trip-pick-amt">${fmt(Math.abs(t.amount))} ${curSym()}</span>`;
+            row.innerHTML = `<span class="ms-trip-pick-desc">${dtStr(t.date)} · ${escapeHtml(t.desc)}</span><span class="ms-trip-pick-amt">${fmt(Math.abs(t.amount))} ${curSym()}</span>`;
+            scrollBox.appendChild(row);
+          });
+          (refundsByExactCat[cat]||[]).sort((a,b)=>b.date-a.date).forEach(r=>{
+            const row = document.createElement('div');
+            row.className = 'ms-trip-pick-row';
+            row.style.paddingLeft = '20px';
+            row.innerHTML = `<span class="ms-trip-pick-desc" style="color:var(--teal)">↩ ${dtStr(r.date)} · ${escapeHtml(r.desc)} (повернення)</span><span class="ms-trip-pick-amt" style="color:var(--teal)">+${fmt(r.amount)} ${curSym()}</span>`;
             scrollBox.appendChild(row);
           });
         });
