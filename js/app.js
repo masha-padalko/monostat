@@ -1778,14 +1778,18 @@ function buildBalancePanel(){
   p.innerHTML = `
     <div class="ms-balance-card">
       <div class="ms-bc-top">
-        <div>
-          <p class="ms-bc-title">Баланс картки</p>
-          <p class="ms-bc-sub">${acc.type} · ${acc.pan}</p>
-        </div>
-        <div class="ms-bc-chip"></div>
+        <p class="ms-bc-title">Баланс картки</p>
+        <span class="ms-bc-cur">${currNames[acc.currency]||acc.currency}</span>
       </div>
-      <div class="ms-bc-amount">${fmt(acc.balance/100)} ${currNames[acc.currency]||acc.currency}</div>
-      ${acc.currency!==978 ? `<p class="ms-bc-eur">${fmtEur(acc.balance/100, acc.currency).trim()}</p>` : ''}
+      <div class="ms-bc-mid">
+        <div class="ms-bc-chip"></div>
+        <svg class="ms-bc-nfc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M7 6.5a8 8 0 0 1 0 11"/><path d="M11 4a12 12 0 0 1 0 16"/><path d="M15 1.5a16 16 0 0 1 0 21"/></svg>
+      </div>
+      <div class="ms-bc-bottom">
+        <div class="ms-bc-amount">${fmt(acc.balance/100)} ${curSym()}</div>
+        ${acc.currency!==978 ? `<p class="ms-bc-eur">${fmtEur(acc.balance/100, acc.currency).trim()}</p>` : ''}
+        <p class="ms-bc-sub">${acc.type} · ${acc.pan}</p>
+      </div>
     </div>
   `;
   return p;
