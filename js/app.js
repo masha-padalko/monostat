@@ -73,8 +73,8 @@ function isPersonTransfer(desc){
 function categorize(desc, mcc, amount, overrides, rules){
   const d = desc.toLowerCase();
   if(overrides[desc]) return overrides[desc];
-  // small Wizz Air charges (under 600) are onboard snacks/coffee/seat fees, not the ticket itself
-  if(d.includes('wizz') && amount < 0 && Math.abs(amount) < 600) return 'Путешествия транспорт: кава в літаку';
+  // small Wizz Air / Ryanair charges (under 600) are onboard snacks/coffee/seat fees, not the ticket itself
+  if((d.includes('wizz') || d.includes('ryan')) && amount < 0 && Math.abs(amount) < 600) return 'Путешествия транспорт: кава в літаку';
   for(const r of rules){
     for(const kw of r.kw){ if(d.includes(kw)) return r.cat; }
   }
@@ -1171,7 +1171,12 @@ function resultsPanel(){
   });
 
   const total = Object.values(byCat).reduce((s,v)=>s+v,0);
-  const catList = Object.entries(byCat).sort((a,b)=>a[1]-b[1]);
+  // biggest spend first, but transfers to people are not real spending categories — always last
+  const catList = Object.entries(byCat).sort((a,b)=>{
+    const ta = a[0]==='перекази людям', tb = b[0]==='перекази людям';
+    if(ta!==tb) return ta ? 1 : -1;
+    return a[1]-b[1];
+  });
 
   const panelToday = buildTodayPanel(all);
 
@@ -1497,7 +1502,6 @@ function resultsPanel(){
   const panelCustomCat = buildCustomCategoryPanel();
   const panelTrips = buildTripsPanel(getAllHistoricalExpenses());
   const panelRange = rangePanel();
-  const panelClean = buildCleanExpensesPanel(all, total, periodDays);
   if(state.jarEnabled && !state.jarAutoCheckedThisLoad && (state.jarPeriodStart !== defaultPeriodStart() || !state.jarLastDate || state.jarLastDate < todayStr())){
     state.jarAutoCheckedThisLoad = true;
     updateJarAccumulation().then(()=>render());
@@ -1517,10 +1521,6 @@ function resultsPanel(){
   balanceRow.appendChild(panelBalance);
   balanceRow.appendChild(panelDailyBudget);
   wrap.appendChild(balanceRow);
-
-  // чисті трати — right under period/balance
-  panelClean.style.marginBottom = '14px';
-  wrap.appendChild(panelClean);
 
   // row 2: overview (where balance used to be) next to today/yesterday
   const topRow = document.createElement('div');
