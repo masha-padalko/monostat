@@ -146,6 +146,7 @@ let state = {
   notes: {...window.MonoStatDefaults.DEFAULT_NOTES},         // txKey -> free-text note about that specific transaction
   dayExcluded: {...window.MonoStatDefaults.DEFAULT_DAY_EXCLUDED},     // txKey -> true if unchecked in "Зараз" (excluded from today/yesterday total)
   notExpense: {...window.MonoStatDefaults.DEFAULT_NOT_EXPENSE},       // txKey -> true — flagged as "not a real expense" (refunded/recharged, fund contribution, etc.) for "Чисті трати"
+  share: {},             // txKey -> my share (0..1) of a shared payment; only this fraction counts as my spending
   amountOverride: {},    // txKey -> net amount after auto-detected partial refund (e.g. Bolt charge minus a same-merchant refund), used only in "Чисті трати"
   txCategoryOverride: {...window.MonoStatDefaults.DEFAULT_TX_CATEGORY_OVERRIDE}, // txKey -> category — overrides just THIS transaction, without affecting every other purchase from the same merchant
   txCache: [...window.MonoStatDefaults.DEFAULT_TX_CACHE],  // every raw transaction ever successfully fetched, deduped by id — lets old periods stay visible without re-querying the API
@@ -291,6 +292,7 @@ async function loadPersisted(){
   const nt = await storageGet('ms_notes'); if(nt) state.notes = {...state.notes, ...JSON.parse(nt)};
   const de = await storageGet('ms_dayexcluded'); if(de) state.dayExcluded = {...state.dayExcluded, ...JSON.parse(de)};
   const ne = await storageGet('ms_notexpense'); if(ne) state.notExpense = {...state.notExpense, ...JSON.parse(ne)};
+  const sh = await storageGet('ms_share'); if(sh) state.share = JSON.parse(sh);
   const ao = await storageGet('ms_amountoverride'); if(ao) state.amountOverride = JSON.parse(ao);
   const tco = await storageGet('ms_txcatoverride'); if(tco) state.txCategoryOverride = {...state.txCategoryOverride, ...JSON.parse(tco)};
   const tc = await storageGet('ms_txcache'); if(tc){ const stored = JSON.parse(tc); const known=new Set(state.txCache.map(x=>x.id)); stored.forEach(it=>{ if(!known.has(it.id)){ state.txCache.push(it); known.add(it.id); } }); }
@@ -416,6 +418,13 @@ function toggleDayExcluded(key, checked){
   persistDayExcluded();
 }
 async function persistNotExpense(){ await storageSet('ms_notexpense', JSON.stringify(state.notExpense)); }
+async function persistShare(){ await storageSet('ms_share', JSON.stringify(state.share)); }
+async function setShare(key, fraction){
+  if(!fraction || fraction>=1) delete state.share[key];
+  else state.share[key] = Math.round(fraction*10000)/10000;
+  render();
+  await persistShare();
+}
 async function persistAmountOverride(){ await storageSet('ms_amountoverride', JSON.stringify(state.amountOverride)); }
 
 // Monobank's own statistics nets a refund against its original charge (e.g. a Bolt
@@ -504,7 +513,7 @@ function exportData(){
     overrides: state.overrides, manual: state.manual, debts: state.debts,
     loanKeys: state.loanKeys, usedIncoming: state.usedIncoming, notes: state.notes,
     customCats: state.customCats, notExpense: state.notExpense, dayExcluded: state.dayExcluded,
-    amountOverride: state.amountOverride, txCategoryOverride: state.txCategoryOverride,
+    amountOverride: state.amountOverride, txCategoryOverride: state.txCategoryOverride, share: state.share,
     txCache: state.txCache, trips: state.trips, tripOf: state.tripOf,
     exportedAt: new Date().toISOString()
   };
@@ -528,6 +537,7 @@ async function importDataFromFile(file){
   if(payload.notExpense) state.notExpense = payload.notExpense;
   if(payload.dayExcluded) state.dayExcluded = payload.dayExcluded;
   if(payload.amountOverride) state.amountOverride = payload.amountOverride;
+  if(payload.share) state.share = {...state.share, ...payload.share};
   if(payload.txCategoryOverride) state.txCategoryOverride = payload.txCategoryOverride;
   if(payload.txCache) mergeIntoCache(payload.txCache); // dedup-merge, doesn't wipe what's already cached here
   if(payload.trips){
@@ -547,7 +557,8 @@ async function importDataFromFile(file){
 
 function txKey(t){
   const d = t.date instanceof Date ? t.date.toISOString().slice(0,16) : String(t.date);
-  return `${d}|${t.desc}|${t.amount}`;
+  const a = t.fullAmount !== undefined ? t.fullAmount : t.amount; // key must not change when only my share is counted
+  return `${d}|${t.desc}|${a}`;
 }
 
 const INCOMING_SELF_KEYWORDS = ['From UAH account','Cancellation','Скасування','Cashback withdrawal','Partial cash out','Top up','Bolt','Uber','Uklon'];
@@ -755,6 +766,13 @@ function mapRawItem(it){
     operationAmount: it.operationAmount!==undefined ? it.operationAmount/100 : it.amount/100
   };
 }
+// Only my part of a shared payment counts everywhere (totals, categories, trips, charts).
+// The real card amount stays in fullAmount, and txKey keeps using it.
+function applyShare(t){
+  const f = state.share[txKey(t)];
+  if(!f || f>=1 || t.amount>=0) return t;
+  return {...t, fullAmount: t.amount, amount: t.amount*f, share: f};
+}
 function ingestTransactions(items){
   state.txs = items.map(mapRawItem);
 }
@@ -766,7 +784,7 @@ function getAllHistoricalExpenses(){
   const fromCache = state.txCache
     .map(mapRawItem)
     .filter(t=>t.amount<0 && !state.loanKeys[txKey(t)])
-    .map(t=>({...t, cat: categoryFor(t)}));
+    .map(t=>applyShare({...t, cat: categoryFor(t)}));
   const fromManual = state.manual
     .filter(m=>m.amount<0)
     .map(m=>({date:new Date(m.date), desc:m.desc, amount:m.amount, cat:m.cat, manual:true}));
@@ -1135,7 +1153,7 @@ function resultsPanel(){
   const activeTxs = getActiveRawTxs();
   const isPrevTab = state.viewTab === 'previous';
 
-  const expenses = activeTxs.filter(t=>t.amount<0 && !state.loanKeys[txKey(t)]).map(t=>({
+  const expenses = activeTxs.filter(t=>t.amount<0 && !state.loanKeys[txKey(t)]).map(t=>applyShare({
     ...t, cat: categoryFor(t)
   }));
   const manualExpenses = state.manual.filter(m=>{
@@ -1189,11 +1207,14 @@ function resultsPanel(){
     const f = new Date(state.from+'T00:00:00'), t = new Date(state.to+'T00:00:00');
     periodDays = Math.max(1, Math.round((t.getTime()-f.getTime())/(24*60*60*1000))+1);
   }
-  const avgPerDay = Math.abs(total)/periodDays;
+  // transfers to people aren't real spending — the donut, its percentages and the daily average ignore them
+  const TRANSFERS_CAT = 'перекази людям';
+  const cleanTotal = total - (byCat[TRANSFERS_CAT]||0);
+  const avgPerDay = Math.abs(cleanTotal)/periodDays;
 
   const panel1 = document.createElement('div');
   panel1.className='ms-panel';
-  const donutGradient = buildConicGradient(catList, total);
+  const donutGradient = buildConicGradient(catList.filter(([c])=>c!==TRANSFERS_CAT), cleanTotal);
 
   // trip spend for THIS period only (not all-time) — she can already see full-trip
   // totals in "Подорожі", this is specifically "how much of THIS period was travel"
@@ -1245,9 +1266,10 @@ function resultsPanel(){
       <div class="ms-donut-wrap">
         <div class="ms-donut" style="background:conic-gradient(${donutGradient})"></div>
         <div class="ms-donut-center">
-          <div class="amt">${fmt(total)}</div>
+          <div class="amt">${fmt(cleanTotal)}</div>
           <div class="lbl">${curSym()} витрачено</div>
-          <div class="lbl" style="margin-top:2px;opacity:.75">${fmtEur(total, curCode()).trim()}</div>
+          <div class="lbl" style="margin-top:2px;opacity:.75">${fmtEur(cleanTotal, curCode()).trim()}</div>
+          <div class="lbl" style="margin-top:2px;opacity:.6;font-size:10px">без переказів людям</div>
         </div>
       </div>
       <div class="ms-legend" id="legendWrap"></div>
@@ -1263,14 +1285,15 @@ function resultsPanel(){
   catList.forEach(([cat,sum])=>{
     const row = document.createElement('div');
     row.className='ms-legend-row ms-legend-row-clickable';
-    const pct = total ? ((Math.abs(sum)/Math.abs(total))*100).toFixed(1) : '0.0';
+    const isTransfers = cat===TRANSFERS_CAT;
+    const pct = isTransfers ? '' : (cleanTotal ? ((Math.abs(sum)/Math.abs(cleanTotal))*100).toFixed(1)+'%' : '0.0%');
     const expanded = !!state.expandedCats[cat];
     row.innerHTML = `<span class="ms-legend-chevron">${expanded?'▾':'▸'}</span>
       <span class="ms-dot" style="background:${COLORS[cat]||'#666'}"></span>
       <span class="ms-legend-icon">${ICONS[cat]||'❓'}</span>
       <span class="ms-legend-cat">${cat}</span>
       <span class="ms-legend-amt">${fmt(sum)} ${curSym()}</span>
-      <span class="ms-legend-pct">${pct}%</span>`;
+      <span class="ms-legend-pct" title="${isTransfers?'Не входить у суму на діаграмі':''}">${isTransfers?'поза сумою':pct}</span>`;
     row.addEventListener('click', ()=>{
       state.expandedCats[cat] = !state.expandedCats[cat];
       render();
@@ -1351,7 +1374,41 @@ function resultsPanel(){
       handleCategoryChange(t, e.target.value);
     });
 
-    tr.innerHTML = `<td>${dateStr}${t.manual?' <span class="ms-tag">ручне</span>':''}</td><td></td><td></td><td></td><td style="text-align:center"></td><td style="text-align:right" class="ms-amt-neg">−${fmt(t.amount)}</td>`;
+    tr.innerHTML = `<td>${dateStr}${t.manual?' <span class="ms-tag">ручне</span>':''}</td><td></td><td></td><td></td><td style="text-align:center"></td><td style="text-align:right" class="ms-amt-neg">−${fmt(t.amount)}</td>`
+
+    if(!t.manual){
+      const amtCell = tr.children[5];
+      if(t.share){
+        const real = document.createElement('div');
+        real.className = 'ms-share-real';
+        real.textContent = `з −${fmt(t.fullAmount)} · ${Math.round(t.share*100)}%`;
+        amtCell.appendChild(real);
+      }
+      const shareSel = document.createElement('select');
+      shareSel.className = 'ms-share-sel';
+      shareSel.title = 'Моя частка цієї витрати (якщо платила за двох)';
+      const cur = t.share ? Math.round(t.share*100) : 100;
+      [['100','Вся моя'],['50','50%'],['33','33%'],['25','25%'],['custom','Своя сума…']].forEach(([v,label])=>{
+        const o = document.createElement('option');
+        o.value = v; o.textContent = v==='100' ? '÷' : label;
+        if(v===String(cur) || (v==='100' && cur===100)) o.selected = true;
+        shareSel.appendChild(o);
+      });
+      if(t.share && ![50,33,25].includes(cur)){
+        const o = document.createElement('option'); o.value='cur'; o.textContent = cur+'%'; o.selected = true; shareSel.appendChild(o);
+      }
+      shareSel.addEventListener('change', e=>{
+        const v = e.target.value;
+        const full = Math.abs(t.fullAmount !== undefined ? t.fullAmount : t.amount);
+        if(v==='custom'){
+          const my = parseFloat((prompt(`Скільки з ${fmt(full)} ${curSym()} — твоя частина?`)||'').replace(',','.'));
+          if(!my || my<=0 || my>=full){ render(); return; }
+          setShare(key, my/full);
+        }else if(v==='cur'){ /* keep as is */ }
+        else setShare(key, parseInt(v,10)/100);
+      });
+      amtCell.appendChild(shareSel);
+    };
 
     const descCell = tr.children[1];
     const descLine = document.createElement('div');
@@ -2355,6 +2412,7 @@ function buildDebtsPanel(){
 }
 
 function buildConicGradient(catList, total){
+  if(!total) return '#E4DCCB 0deg 360deg';
   let acc = 0;
   const stops = [];
   catList.forEach(([cat,sum])=>{
