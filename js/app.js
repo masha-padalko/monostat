@@ -146,6 +146,11 @@ let state = {
   notes: {...window.MonoStatDefaults.DEFAULT_NOTES},         // txKey -> free-text note about that specific transaction
   dayExcluded: {...window.MonoStatDefaults.DEFAULT_DAY_EXCLUDED},     // txKey -> true if unchecked in "Зараз" (excluded from today/yesterday total)
   notExpense: {...window.MonoStatDefaults.DEFAULT_NOT_EXPENSE},       // txKey -> true — flagged as "not a real expense" (refunded/recharged, fund contribution, etc.) for "Чисті трати"
+  syncedRanges: [],      // [[fromUnix,toUnix],...] — periods already fetched/imported completely, so gap detection doesn't re-request them
+  sync: {running:false, msg:'', done:0, total:0},
+  importMsg: '',
+  lastApiCall: 0,
+  autoSyncDone: false,
   share: {},             // txKey -> my share (0..1) of a shared payment; only this fraction counts as my spending
   amountOverride: {},    // txKey -> net amount after auto-detected partial refund (e.g. Bolt charge minus a same-merchant refund), used only in "Чисті трати"
   txCategoryOverride: {...window.MonoStatDefaults.DEFAULT_TX_CATEGORY_OVERRIDE}, // txKey -> category — overrides just THIS transaction, without affecting every other purchase from the same merchant
@@ -292,6 +297,7 @@ async function loadPersisted(){
   const nt = await storageGet('ms_notes'); if(nt) state.notes = {...state.notes, ...JSON.parse(nt)};
   const de = await storageGet('ms_dayexcluded'); if(de) state.dayExcluded = {...state.dayExcluded, ...JSON.parse(de)};
   const ne = await storageGet('ms_notexpense'); if(ne) state.notExpense = {...state.notExpense, ...JSON.parse(ne)};
+  const sr = await storageGet('ms_syncedranges'); if(sr) state.syncedRanges = JSON.parse(sr);
   const sh = await storageGet('ms_share'); if(sh) state.share = JSON.parse(sh);
   const ao = await storageGet('ms_amountoverride'); if(ao) state.amountOverride = JSON.parse(ao);
   const tco = await storageGet('ms_txcatoverride'); if(tco) state.txCategoryOverride = {...state.txCategoryOverride, ...JSON.parse(tco)};
@@ -704,11 +710,13 @@ function reconstructBalanceAtStartOfDay(dateStr){
 
 // ---------- API ----------
 async function fetchClientInfo(token){
+  state.lastApiCall = Date.now();
   const res = await fetch('https://api.monobank.ua/personal/client-info', {headers:{'X-Token':token}});
   if(!res.ok) throw new Error('HTTP '+res.status);
   return res.json();
 }
 async function fetchStatement(token, account, fromUnix, toUnix){
+  state.lastApiCall = Date.now();
   const url = `https://api.monobank.ua/personal/statement/${account}/${fromUnix}/${toUnix}`;
   const res = await fetch(url, {headers:{'X-Token':token}});
   if(!res.ok) throw new Error('HTTP '+res.status);
@@ -744,6 +752,7 @@ async function handleFetchStatement(){
     const toUnix = Math.floor(new Date(state.to+'T23:59:59').getTime()/1000);
     const items = await fetchStatement(state.token.trim(), state.selectedAccount, fromUnix, toUnix);
     mergeIntoCache(items);
+    if(items.length < 500) addSyncedRange(fromUnix, Math.min(toUnix, Math.floor(Date.now()/1000)));
     ingestTransactions(items);
     state.viewTab = 'current';
     state.step = 'results';
@@ -752,6 +761,7 @@ async function handleFetchStatement(){
     state.error = 'statement';
   }
   state.loading = false; render();
+  if(state.step==='results') setTimeout(autoSync, 0);
 }
 
 function mapRawItem(it){
@@ -2020,19 +2030,255 @@ function buildIncomingPanel(){
   return p;
 }
 
+// ---------- History completeness: gap detection, auto-sync and CSV import ----------
+// Why this exists: a statement is only fetched for the exact dates she picks, so days between
+// two separate loads were silently missing (e.g. 02–09 Oct). Now the app (a) remembers which
+// periods are fully covered, (b) finds the holes, (c) fills them itself in ≤31-day chunks
+// under Monobank's limit of 1 request per 60 s, and (d) can import the official CSV report
+// from the Monobank app for any older period — no limits, no waiting.
+const DAY_S = 86400;
+const sleepMs = ms => new Promise(r=>setTimeout(r, ms));
+
+function mergeRanges(list){
+  const a = list.map(r=>[r[0],r[1]]).sort((x,y)=>x[0]-y[0]);
+  const out = [];
+  a.forEach(r=>{
+    const last = out[out.length-1];
+    if(last && r[0] <= last[1]+1) last[1] = Math.max(last[1], r[1]);
+    else out.push(r);
+  });
+  return out;
+}
+function addSyncedRange(a, b){
+  state.syncedRanges = mergeRanges(state.syncedRanges.concat([[a,b]]));
+  storageSet('ms_syncedranges', JSON.stringify(state.syncedRanges));
+}
+function subtractRanges(intervals, covers){
+  let res = intervals;
+  covers.forEach(([ca,cb])=>{
+    const next = [];
+    res.forEach(([a,b])=>{
+      if(cb<a || ca>b){ next.push([a,b]); return; }
+      if(ca>a) next.push([a, ca-1]);
+      if(cb<b) next.push([cb+1, b]);
+    });
+    res = next;
+  });
+  return res;
+}
+// Holes in the cached history: gaps >4 days between neighbouring operations (last ~12 months)
+// plus the "tail" from the last operation until now — minus whatever is already known to be
+// covered (a period with genuinely no payments won't be re-requested forever).
+function findGaps(){
+  const now = Math.floor(Date.now()/1000);
+  const horizon = now - 370*DAY_S;
+  const ts = [...new Set(state.txCache.map(x=>x.time))].sort((a,b)=>a-b);
+  let cand = [];
+  for(let i=0;i<ts.length-1;i++){
+    if(ts[i+1]-ts[i] > 4*DAY_S && ts[i+1] > horizon){
+      cand.push({r:[Math.max(ts[i]+1, horizon), ts[i+1]-1], tail:false});
+    }
+  }
+  const last = ts.length ? ts[ts.length-1] : now-30*DAY_S;
+  cand.push({r:[last+1, now], tail:true});
+  const out = [];
+  cand.forEach(c=>{
+    subtractRanges([c.r], state.syncedRanges).forEach(([a,b])=>{
+      if(c.tail ? (b-a > 2*3600) : (b-a > 3*DAY_S)) out.push({from:a, to:b, tail:c.tail});
+    });
+  });
+  return out;
+}
+function chunkRange(a, b){
+  const out = [];
+  for(let s0=a; s0<=b; s0 += 30*DAY_S) out.push([s0, Math.min(b, s0+30*DAY_S-1)]);
+  return out;
+}
+function fmtUnixDay(t){ return new Date(t*1000).toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit',year:'2-digit'}); }
+function setSyncText(msg){
+  state.sync.msg = msg;
+  const el = document.getElementById('syncStatus');
+  if(el) el.textContent = msg; // no full render() here — it would reset scroll/inputs every second
+}
+// After new data lands in the cache, refresh what the "current period" view shows.
+function refreshCurrentView(){
+  if(state.step==='results' && state.viewTab==='current' && state.from){
+    if(state.to < todayStr()) state.to = todayStr();
+    const a = Math.floor(new Date(state.from+'T00:00:00').getTime()/1000);
+    const b = Math.floor(new Date(state.to+'T23:59:59').getTime()/1000);
+    ingestTransactions(state.txCache.filter(it=>it.time>=a && it.time<=b));
+  }
+}
+async function runSync(gaps){
+  if(state.sync.running) return;
+  if(!state.token || !state.selectedAccount){ setSyncText('Спочатку підключись токеном і обери картку.'); return; }
+  const queue = [];
+  gaps.forEach(g=>chunkRange(g.from, g.to).forEach(c=>queue.push(c)));
+  if(!queue.length){ setSyncText('Пропусків немає ✓'); return; }
+  state.sync = {running:true, msg:'', done:0, total:queue.length};
+  try{
+    while(queue.length){
+      const [a,b] = queue.shift();
+      let wait = 61000 - (Date.now()-state.lastApiCall); // Monobank: 1 request / 60 s per token
+      while(wait>0){
+        setSyncText(`Чекаю ліміт Monobank: ${Math.ceil(wait/1000)} с · далі ${fmtUnixDay(a)}–${fmtUnixDay(b)} (${state.sync.done+1} з ${state.sync.total})`);
+        await sleepMs(Math.min(wait, 1000));
+        wait = 61000 - (Date.now()-state.lastApiCall);
+      }
+      setSyncText(`Завантажую ${fmtUnixDay(a)}–${fmtUnixDay(b)} (${state.sync.done+1} з ${state.sync.total})…`);
+      let items;
+      try{
+        items = await fetchStatement(state.token.trim(), state.selectedAccount, a, b);
+      }catch(e){
+        if(String(e.message).includes('429')){ queue.unshift([a,b]); continue; } // too early — wait the full minute again
+        throw e;
+      }
+      mergeIntoCache(items);
+      if(items.length >= 500){
+        // the API caps one response at 500 operations — continue from the oldest one received
+        const oldest = Math.min(...items.map(i=>i.time));
+        queue.unshift([a, oldest]); state.sync.total++;
+      }else{
+        addSyncedRange(a, Math.min(b, Math.floor(Date.now()/1000)));
+      }
+      state.sync.done++;
+    }
+    setSyncText('Готово ✓ Історію догружено.');
+  }catch(e){
+    setSyncText('Помилка синхронізації: '+(e.message||e)+'. Спробуй ще раз пізніше.');
+  }
+  state.sync.running = false;
+  refreshCurrentView();
+  render();
+}
+// Runs once per visit right after the statement is shown: fills the tail and recent holes
+// (older holes are offered with a button — they can take many minutes).
+function autoSync(){
+  if(state.autoSyncDone || state.sync.running) return;
+  state.autoSyncDone = true;
+  const recent = Math.floor(Date.now()/1000) - 62*DAY_S;
+  const gaps = findGaps().filter(g=>g.tail || g.to >= recent);
+  if(gaps.length) runSync(gaps);
+}
+
+// --- CSV from the Monobank app ("Виписка" → CSV) ---
+function tzOffsetMs(ts, tz){
+  const p = {};
+  new Intl.DateTimeFormat('en-US',{timeZone:tz,hourCycle:'h23',year:'numeric',month:'numeric',day:'numeric',hour:'numeric',minute:'numeric',second:'numeric'})
+    .formatToParts(new Date(ts)).forEach(x=>{ if(x.type!=='literal') p[x.type]=+x.value; });
+  return Date.UTC(p.year,p.month-1,p.day,p.hour,p.minute,p.second) - Math.floor(ts/1000)*1000;
+}
+function kyivToUnix(y,mo,d,h,mi,s){
+  const wall = Date.UTC(y,mo-1,d,h,mi,s);
+  let utc = wall;
+  for(let i=0;i<2;i++) utc = wall - tzOffsetMs(utc,'Europe/Kyiv');
+  return Math.floor(utc/1000);
+}
+function parseCsv(text){
+  const rows = []; let row = [], cur = '', q = false;
+  text = text.replace(/^﻿/,'');
+  for(let i=0;i<text.length;i++){
+    const c = text[i];
+    if(q){
+      if(c==='"'){ if(text[i+1]==='"'){ cur+='"'; i++; } else q=false; }
+      else cur += c;
+    }else if(c==='"') q = true;
+    else if(c===','){ row.push(cur); cur=''; }
+    else if(c==='\n'){ row.push(cur); rows.push(row); row=[]; cur=''; }
+    else if(c!=='\r') cur += c;
+  }
+  if(cur!=='' || row.length){ row.push(cur); rows.push(row); }
+  return rows;
+}
+const CSV_CURRENCY = {UAH:980,EUR:978,USD:840,RON:946,TRY:949,PLN:985,GEL:981,BGN:975,MDL:498,CZK:203,HUF:348,GBP:826,CHF:756,SEK:752,NOK:578,DKK:208};
+function hashStr(s){ let h=5381; for(let i=0;i<s.length;i++) h=((h<<5)+h+s.charCodeAt(i))|0; return (h>>>0).toString(36); }
+function csvToItems(text){
+  const rows = parseCsv(text);
+  if(!rows.length || !/Дата/i.test(rows[0][0]||'') || !/Деталі/i.test(rows[0][1]||'')) throw new Error('Це не схоже на CSV-виписку з застосунку Monobank.');
+  const num = v=>{ const n = parseFloat(String(v).replace(/\s/g,'').replace(',','.')); return isFinite(n) ? n : 0; };
+  const items = [];
+  rows.slice(1).forEach(r=>{
+    if(r.length < 10) return;
+    const m = /^(\d\d)\.(\d\d)\.(\d{4}) (\d\d):(\d\d):(\d\d)$/.exec((r[0]||'').trim());
+    if(!m) return;
+    const time = kyivToUnix(+m[3],+m[2],+m[1],+m[4],+m[5],+m[6]); // report times are Kyiv time
+    const amount = Math.round(num(r[3])*100);
+    items.push({
+      id: `csv_${time}_${amount}_${hashStr(r[1]||'')}`, time, description: r[1]||'', mcc: parseInt(r[2],10)||0,
+      amount, operationAmount: Math.round(num(r[4])*100), currencyCode: CSV_CURRENCY[r[5]]||980,
+      balance: Math.round(num(r[9])*100), cashbackAmount: Math.round(num(r[8])*100),
+      commissionRate: Math.round(num(r[7])*100), hold: false
+    });
+  });
+  return items;
+}
+function readFileText(f){
+  return new Promise((res,rej)=>{
+    const fr = new FileReader();
+    fr.onload = ()=>res(String(fr.result)); fr.onerror = ()=>rej(fr.error);
+    fr.readAsText(f, 'utf-8');
+  });
+}
+async function importCsvFiles(files){
+  let added = 0, skipped = 0, bad = 0;
+  try{
+    for(const f of files){
+      const items = csvToItems(await readFileText(f));
+      if(!items.length){ bad++; continue; }
+      // already have it (loaded earlier via API)? match by minute + amount, counting repeats
+      const have = new Map();
+      state.txCache.forEach(it=>{ const k = Math.floor(it.time/60)+'|'+it.amount; have.set(k,(have.get(k)||0)+1); });
+      const fresh = [];
+      items.forEach(it=>{
+        const k = Math.floor(it.time/60)+'|'+it.amount;
+        if(have.get(k)>0){ have.set(k, have.get(k)-1); skipped++; } else fresh.push(it);
+      });
+      added += mergeIntoCache(fresh);
+      const times = items.map(i=>i.time);
+      addSyncedRange(Math.min(...times), Math.max(...times)); // the report covers that whole span
+    }
+    state.importMsg = `Імпорт CSV: додано ${added}, вже були ${skipped}${bad?`, порожніх файлів: ${bad}`:''}.`;
+  }catch(e){
+    state.importMsg = 'Помилка імпорту: '+(e.message||e);
+  }
+  refreshCurrentView();
+  render();
+}
+
 function buildDataTransferPanel(){
   const p = document.createElement('div');
   p.className='ms-panel';
   p.innerHTML = `
     <h2>Перенести дані на інший пристрій</h2>
     <p class="ms-hint">Виправлені категорії, ручні записи і борги зберігаються локально на цьому пристрої/браузері. Щоб перенести їх на телефон чи інший комп'ютер — вивантаж файл тут і заватаж його там.</p>
-    <div class="ms-row">
+    <h2 style="margin-top:18px">Історія з Monobank</h2>
+    <div id="syncBox"></div>
+    <div class="ms-row" style="margin-top:8px">
+      <label class="ms-btn secondary" style="cursor:pointer" for="csvInput">Імпорт CSV з Monobank</label>
+      <input type="file" id="csvInput" accept=".csv,text/csv" multiple style="display:none">
+    </div>
+    <p class="ms-hint">CSV-виписку за будь-який період можна скачати в застосунку Monobank — вона вантажиться без обмежень API, дублі пропускаються.</p>
+    ${state.importMsg ? `<p class="ms-hint" style="color:var(--teal)">${escapeHtml(state.importMsg)}</p>` : ''}
+    <div class="ms-row" style="margin-top:14px">
       <button class="ms-btn secondary" id="exportBtn">Вивантажити дані (.json)</button>
       <label class="ms-btn secondary" style="cursor:pointer" for="importInput">Завантажити дані з файлу</label>
       <input type="file" id="importInput" accept="application/json" style="display:none">
     </div>
   `;
   p.querySelector('#exportBtn').addEventListener('click', exportData);
+  p.querySelector('#csvInput').addEventListener('change', async (e)=>{
+    if(e.target.files.length) await importCsvFiles([...e.target.files]);
+  });
+  const box = p.querySelector('#syncBox');
+  const gaps = findGaps();
+  const head = gaps.filter(g=>!g.tail);
+  const queueSize = gaps.reduce((n,g)=>n+chunkRange(g.from,g.to).length, 0);
+  box.innerHTML = `
+    <div class="ms-hint" id="syncStatus" style="margin:0 0 6px">${escapeHtml(state.sync.msg||'')}</div>
+    ${head.length ? `<div class="ms-hint" style="margin:0 0 6px">Немає даних за: ${head.slice(0,6).map(g=>fmtUnixDay(g.from)+'–'+fmtUnixDay(g.to)).join(', ')}${head.length>6?' …':''}</div>` : `<div class="ms-hint" style="margin:0 0 6px">Пропусків в історії (за останні 12 місяців) не знайдено ✓</div>`}
+    ${queueSize ? `<button class="ms-btn secondary" id="syncBtn" ${state.sync.running?'disabled':''}>${state.sync.running?'Триває…':`Догрузити пропуски (${queueSize} запит., ≈ ${queueSize} хв)`}</button>` : ''}`;
+  const syncBtn = box.querySelector('#syncBtn');
+  if(syncBtn) syncBtn.addEventListener('click', ()=>runSync(findGaps()));
   p.querySelector('#importInput').addEventListener('change', async (e)=>{
     if(e.target.files[0]) await importDataFromFile(e.target.files[0]);
   });
