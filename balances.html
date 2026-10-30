@@ -17,7 +17,8 @@
     <div class="ms-panel">
       <p class="ms-hint">
         Усе, що тут вписуєш, лишається <b style="color:var(--text)">тільки в цьому браузері</b> —
-        жодних запитів нікуди не йде, ніяка Supabase чи Monobank API тут не задіяні.
+        дані про баланси не надсилаються в Supabase чи Monobank. Для перерахунку в євро сторінка
+        окремо завантажує публічні курси валют Monobank; банківські рахунки чи виписка не запитуються.
         Найпростіший і найбезпечніший спосіб тримати приватний підсумок «скільки всього є»,
         не спокушаючи нікого зайвим доступом до реальних рахунків.
       </p>
@@ -36,6 +37,7 @@
         <span class="ms-total-amt" id="totalEur">€ 0.00</span>
       </div>
       <div id="byCurrencyList" class="ms-by-currency"></div>
+      <p class="ms-hint" id="exchangeRateStatus" style="margin-top:10px"></p>
     </div>
 
     <div class="ms-controls">

@@ -20,8 +20,8 @@
     return; // stop here — nothing else in this file runs
   }
 
-  // Same approximate EUR conversion rates as MonoStat, kept in sync manually.
-  // For a rough personal total only — not official/financial-grade rates.
+  // Fallback rates are used if Monobank's public currency endpoint is unavailable
+  // or does not provide a currency pair. These are approximate, not official rates.
   const CURRENCIES = [
     {code:'UAH', sym:'₴', toEur:1/51},
     {code:'EUR', sym:'€', toEur:1},
@@ -31,6 +31,11 @@
     {code:'GEL', sym:'₾', toEur:1/2.9},
   ];
   const CUR_BY_CODE = Object.fromEntries(CURRENCIES.map(c => [c.code, c]));
+  const MONO_CURRENCY_CODES = {UAH:980, EUR:978, USD:840, PLN:985, RON:946, GEL:981};
+  const RATE_CACHE_KEY = 'ms_balances_mono_rates';
+  const RATE_CACHE_MAX_AGE = 60 * 1000; // Monobank limits requests to about one per minute.
+  let rateSource = 'fallback';
+  let rateAsOf = null;
 
   const STORAGE_KEY = 'ms_balances_sources';
 
@@ -64,6 +69,94 @@
     if(!s) return 0;
     const n = parseFloat(s.replace(',', '.'));
     return Number.isFinite(n) ? n : 0;
+  }
+
+  function applyMonobankRates(items){
+    if(!Array.isArray(items)) throw new Error('Unexpected rates response');
+    const graph = new Map();
+    let latestDate = 0;
+    items.forEach(item => {
+      const codeA = Number(item.currencyCodeA);
+      const codeB = Number(item.currencyCodeB);
+      const buy = Number(item.rateBuy);
+      const sell = Number(item.rateSell);
+      const cross = Number(item.rateCross);
+      const rate = Number.isFinite(buy) && buy > 0 && Number.isFinite(sell) && sell > 0
+        ? (buy + sell) / 2
+        : (Number.isFinite(cross) && cross > 0 ? cross : null);
+      if(!rate) return;
+      if(!graph.has(codeA)) graph.set(codeA, []);
+      if(!graph.has(codeB)) graph.set(codeB, []);
+      graph.get(codeA).push([codeB, rate]);
+      graph.get(codeB).push([codeA, 1 / rate]);
+      if(Number(item.date) > latestDate) latestDate = Number(item.date);
+    });
+
+    function conversionRate(from, to){
+      const queue = [[from, 1]];
+      const visited = new Set([from]);
+      while(queue.length){
+        const [code, rate] = queue.shift();
+        if(code === to) return rate;
+        (graph.get(code) || []).forEach(([nextCode, nextRate]) => {
+          if(!visited.has(nextCode)){
+            visited.add(nextCode);
+            queue.push([nextCode, rate * nextRate]);
+          }
+        });
+      }
+      return null;
+    }
+
+    if(!conversionRate(980, 978)) throw new Error('EUR/UAH rate missing');
+    CURRENCIES.forEach(currency => {
+      const currencyCode = MONO_CURRENCY_CODES[currency.code];
+      const rate = currencyCode ? conversionRate(currencyCode, 978) : null;
+      if(rate) currency.toEur = rate;
+    });
+    rateAsOf = latestDate ? new Date(latestDate * 1000) : new Date();
+    rateSource = 'Monobank';
+  }
+
+  async function loadMonobankRates(){
+    let cached = null;
+    try{
+      cached = JSON.parse(localStorage.getItem(RATE_CACHE_KEY) || 'null');
+    }catch(e){ /* ignore invalid cache */ }
+
+    if(cached && Array.isArray(cached.items) && Date.now() - cached.fetchedAt < RATE_CACHE_MAX_AGE){
+      try{
+        applyMonobankRates(cached.items);
+        return;
+      }catch(e){ /* refresh invalid cached rates below */ }
+    }
+
+    try{
+      const response = await fetch('https://api.monobank.ua/bank/currency', {cache:'no-store'});
+      if(!response.ok) throw new Error(`Monobank returned HTTP ${response.status}`);
+      const items = await response.json();
+      applyMonobankRates(items);
+      try{
+        localStorage.setItem(RATE_CACHE_KEY, JSON.stringify({items, fetchedAt:Date.now()}));
+      }catch(e){ /* rate calculation still works when storage is unavailable */ }
+    }catch(error){
+      console.warn('Could not refresh Monobank currency rates:', error);
+      if(cached && Array.isArray(cached.items)){
+        try{
+          applyMonobankRates(cached.items);
+          rateSource = 'збережений курс Monobank';
+        }catch(e){ /* retain fallback rates */ }
+      }
+    }
+  }
+
+  function renderRateStatus(){
+    const status = document.getElementById('exchangeRateStatus');
+    if(!status) return;
+    const dateText = rateAsOf
+      ? ` · дані від ${rateAsOf.toLocaleString('uk-UA', {dateStyle:'short', timeStyle:'short'})}`
+      : '';
+    status.textContent = `Курс для перерахунку: ${rateSource}${dateText}. Підсумок приблизний.`;
   }
 
   function setDirty(val){
@@ -179,6 +272,7 @@
 
     const totalEl = document.getElementById('totalEur');
     if(totalEl) totalEl.textContent = `€ ${fmtNum.format(totalEur)}`;
+    renderRateStatus();
 
     const byCurList = document.getElementById('byCurrencyList');
     if(byCurList){
@@ -226,6 +320,10 @@
   document.addEventListener('DOMContentLoaded', () => {
     sources = loadSources();
     renderSources();
+    loadMonobankRates().then(() => {
+      updateTotals();
+      renderRateStatus();
+    });
     setDirty(false);
 
     document.getElementById('addSourceBtn').addEventListener('click', () => {
