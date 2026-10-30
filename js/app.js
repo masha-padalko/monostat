@@ -1311,34 +1311,38 @@ function resultsPanel(){
     });
     legend.appendChild(row);
 
+    if(cat==='продукти'){
+      const storeTotals = new Map();
+      const addStoreAmount = (desc, amount) => {
+        const name = (desc || '(без опису)').trim().replace(/\s+/g, ' ');
+        const key = name.toLocaleLowerCase('uk');
+        const existing = storeTotals.get(key);
+        if(existing) existing.amount += amount;
+        else storeTotals.set(key, {name, amount});
+      };
+      (byCatTx[cat]||[]).forEach(t=>addStoreAmount(t.desc, Math.abs(t.amount)));
+      (refundsByCat[cat]||[]).forEach(r=>addStoreAmount(r.desc, -r.amount));
+      const stores = [...storeTotals.values()].sort((a,b)=>b.amount-a.amount);
+      if(stores.length){
+        const storeDetail = document.createElement('div');
+        storeDetail.className = 'ms-legend-detail ms-store-breakdown';
+        const heading = document.createElement('div');
+        heading.className = 'ms-store-breakdown-title';
+        heading.textContent = 'Витрати по магазинах';
+        storeDetail.appendChild(heading);
+        stores.forEach(store=>{
+          const storeRow = document.createElement('div');
+          storeRow.className = 'ms-store-breakdown-row';
+          storeRow.innerHTML = `<span>${escapeHtml(store.name)}</span><span>${store.amount<0?'−':''}${fmt(store.amount)} ${curSym()}</span>`;
+          storeDetail.appendChild(storeRow);
+        });
+        legend.appendChild(storeDetail);
+      }
+    }
+
     if(expanded){
       const detail = document.createElement('div');
       detail.className = 'ms-legend-detail';
-      if(cat==='продукти'){
-        const storeTotals = new Map();
-        const addStoreAmount = (desc, amount) => {
-          const name = (desc || '(без опису)').trim().replace(/\s+/g, ' ');
-          const key = name.toLocaleLowerCase('uk');
-          const existing = storeTotals.get(key);
-          if(existing) existing.amount += amount;
-          else storeTotals.set(key, {name, amount});
-        };
-        (byCatTx[cat]||[]).forEach(t=>addStoreAmount(t.desc, Math.abs(t.amount)));
-        (refundsByCat[cat]||[]).forEach(r=>addStoreAmount(r.desc, -r.amount));
-        const stores = [...storeTotals.values()].sort((a,b)=>b.amount-a.amount);
-        if(stores.length){
-          const heading = document.createElement('div');
-          heading.className = 'ms-store-breakdown-title';
-          heading.textContent = 'Витрати по магазинах';
-          detail.appendChild(heading);
-          stores.forEach(store=>{
-            const storeRow = document.createElement('div');
-            storeRow.className = 'ms-store-breakdown-row';
-            storeRow.innerHTML = `<span>${escapeHtml(store.name)}</span><span>${store.amount<0?'−':''}${fmt(store.amount)} ${curSym()}</span>`;
-            detail.appendChild(storeRow);
-          });
-        }
-      }
       (byCatTx[cat]||[]).sort((a,b)=>b.date-a.date).forEach(t=>{
         const key = txKey(t);
         const note = state.notes[key];
