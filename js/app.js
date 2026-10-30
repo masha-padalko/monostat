@@ -931,7 +931,8 @@ function connectPanel(){
   p.innerHTML = `
     <h2>Крок 1 · Підключення</h2>
     ${state.initialLoading ? `<p class="ms-hint"><span class="ms-spin"></span> Завантажую збережені дані…</p>` : ''}
-    <p class="ms-hint">Токен отримується на <span style="color:var(--gold)">api.monobank.ua</span> (вхід через QR у застосунку). Він діє доти, доки ти його не відкличеш там само.</p>
+    <p class="ms-hint">Отримай токен на <a href="https://api.monobank.ua/" target="_blank" rel="noopener noreferrer" style="color:var(--gold)">офіційному сайті Monobank ↗</a> (авторизація через QR у застосунку). Токен потрібен лише для читання даних і його можна відкликати в Monobank.</p>
+    <p class="ms-hint">Токен надсилається напряму з браузера до Monobank і не зберігається в Supabase. Якщо ввімкнути «Запам'ятати», він залишиться лише в локальному сховищі цього браузера; вимкни опцію, щоб не зберігати його після завершення сесії. Використовуй токен лише на своєму пристрої.</p>
     <div class="ms-row">
       <div class="ms-field" style="flex:2">
         <label>Особистий токен</label>
@@ -941,7 +942,7 @@ function connectPanel(){
     </div>
     <label class="ms-checkline">
       <input type="checkbox" id="rememberChk" ${state.rememberToken?'checked':''}>
-      <span>Запам'ятати токен на цьому пристрої, щоб не вводити щоразу. Він збережеться у сховищі цієї розмови — вимикай, якщо не хочеш цього.</span>
+      <span>Запам'ятати токен у локальному сховищі цього браузера, щоб не вводити щоразу.</span>
     </label>
     ${state.error==='connect' ? `<div class="ms-error">Не вдалося підключитися. Або токен невірний, або (найімовірніше) браузер заблокував запит через CORS — Monobank API не завжди дозволяє звертання напряму з чужих сторінок.<br><br>Запасний варіант: відкрий у новій вкладці <code>https://api.monobank.ua/personal/client-info</code> з заголовком <code>X-Token</code> (наприклад через розширення на кшталт "Requestly" чи через термінал: <code>curl -H "X-Token: ТВІЙ_ТОКЕН" https://api.monobank.ua/personal/statement/0/UNIX_FROM/UNIX_TO</code>), скопіюй відповідь і встав нижче.</div>
     <button class="ms-btn secondary" id="jsonModeBtn" style="margin-top:10px">Вставити дані вручну (JSON)</button>` : ''}
@@ -1313,6 +1314,31 @@ function resultsPanel(){
     if(expanded){
       const detail = document.createElement('div');
       detail.className = 'ms-legend-detail';
+      if(cat==='продукти'){
+        const storeTotals = new Map();
+        const addStoreAmount = (desc, amount) => {
+          const name = (desc || '(без опису)').trim().replace(/\s+/g, ' ');
+          const key = name.toLocaleLowerCase('uk');
+          const existing = storeTotals.get(key);
+          if(existing) existing.amount += amount;
+          else storeTotals.set(key, {name, amount});
+        };
+        (byCatTx[cat]||[]).forEach(t=>addStoreAmount(t.desc, Math.abs(t.amount)));
+        (refundsByCat[cat]||[]).forEach(r=>addStoreAmount(r.desc, -r.amount));
+        const stores = [...storeTotals.values()].sort((a,b)=>b.amount-a.amount);
+        if(stores.length){
+          const heading = document.createElement('div');
+          heading.className = 'ms-store-breakdown-title';
+          heading.textContent = 'Витрати по магазинах';
+          detail.appendChild(heading);
+          stores.forEach(store=>{
+            const storeRow = document.createElement('div');
+            storeRow.className = 'ms-store-breakdown-row';
+            storeRow.innerHTML = `<span>${escapeHtml(store.name)}</span><span>${store.amount<0?'−':''}${fmt(store.amount)} ${curSym()}</span>`;
+            detail.appendChild(storeRow);
+          });
+        }
+      }
       (byCatTx[cat]||[]).sort((a,b)=>b.date-a.date).forEach(t=>{
         const key = txKey(t);
         const note = state.notes[key];
