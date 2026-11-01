@@ -93,22 +93,6 @@ function categoryFor(t){
   return categorize(t.desc, t.mcc, t.amount, state.overrides, state.rules);
 }
 
-// Groups her fine-grained categories into the 4 buckets that actually matter when
-// looking back at a trip: where did the money go — housing, getting around, food, or
-// everything else (souvenirs, beauty, entertainment, etc.)
-function tripGroupFor(cat){
-  const housing = ['Путешествия - жилье'];
-  const transport = ['такси','транспорт','Путешествия транспорт: самолёт','Путешествия транспорт: кава в літаку',
-    'Путешествия транспорт: поезд','Путешествия транспорт: автобус','Путешествия транспорт: інше','авто','бензин'];
-  const food = ['продукти','продукти спільні','обеды'];
-  if(housing.includes(cat)) return 'Житло';
-  if(transport.includes(cat)) return 'Транспорт';
-  if(food.includes(cat)) return 'Їжа';
-  return 'Інше';
-}
-const TRIP_GROUP_ORDER = ['Житло','Транспорт','Їжа','Інше'];
-const TRIP_GROUP_ICONS = {'Житло':'🏠','Транспорт':'🚌','Їжа':'🍽️','Інше':'🛍️'};
-
 // Shared handler for the category <select> wherever it appears. Asks whether the change
 // should apply only to this one purchase or to every purchase from that merchant — because
 // by default a category change is merchant-wide, which surprised her when one supermarket
@@ -2465,37 +2449,54 @@ function buildTripsPanel(all){
       if(txs.length===0){
         detailWrap.innerHTML = '<p class="ms-hint" style="margin:10px 0">Ще нічого не прив\'язано — познач операції в «Всі операції» вище.</p>';
       }else{
-        detailWrap.innerHTML = `<p class="ms-hint" style="margin:10px 0">Згруповано за точною категорією, суми враховують повернення (щоб прибрати операцію — онови її поїздку на «—» в «Всі операції»):</p>`;
-        const byCatTxs = {};
-        txs.forEach(t=>{ (byCatTxs[t.cat] = byCatTxs[t.cat]||[]).push(t); });
-        const refundsByExactCat = {};
-        tripRefunds.forEach(r=>{ const c = categoryFor(r); (refundsByExactCat[c] = refundsByExactCat[c]||[]).push(r); });
+        detailWrap.innerHTML = `<p class="ms-hint" style="margin:10px 0">Витрати по категоріях; суми враховують повернення.</p>`;
 
-        const scrollBox = document.createElement('div');
-        scrollBox.className = 'ms-trip-scroll';
-        Object.keys(byExactCat).sort((a,b)=>byExactCat[b]-byExactCat[a]).forEach(cat=>{
-          const catHead = document.createElement('div');
-          catHead.className = 'ms-trip-pick-row';
-          catHead.style.fontWeight = '600';
-          catHead.style.background = 'var(--panel-hi)';
-          catHead.innerHTML = `<span class="ms-trip-pick-desc">${ICONS[cat]||'❓'} ${cat}</span><span class="ms-trip-pick-amt">${fmt(byExactCat[cat])} ${curSym()}</span>`;
-          scrollBox.appendChild(catHead);
-          (byCatTxs[cat]||[]).sort((a,b)=>b.date-a.date).forEach(t=>{
-            const row = document.createElement('div');
-            row.className = 'ms-trip-pick-row';
-            row.style.paddingLeft = '20px';
-            row.innerHTML = `<span class="ms-trip-pick-desc">${dtStr(t.date)} · ${escapeHtml(t.desc)}</span><span class="ms-trip-pick-amt">${fmt(Math.abs(t.amount))} ${curSym()}</span>`;
-            scrollBox.appendChild(row);
-          });
-          (refundsByExactCat[cat]||[]).sort((a,b)=>b.date-a.date).forEach(r=>{
-            const row = document.createElement('div');
-            row.className = 'ms-trip-pick-row';
-            row.style.paddingLeft = '20px';
-            row.innerHTML = `<span class="ms-trip-pick-desc" style="color:var(--teal)">↩ ${dtStr(r.date)} · ${escapeHtml(r.desc)} (повернення)</span><span class="ms-trip-pick-amt" style="color:var(--teal)">+${fmt(r.amount)} ${curSym()}</span>`;
-            scrollBox.appendChild(row);
-          });
+        const categoryEntries = Object.entries(byExactCat).sort((a,b)=>b[1]-a[1]);
+        const maxCategorySpend = Math.max(1, ...categoryEntries.map(([,amount])=>amount));
+        const categoryGrid = document.createElement('div');
+        categoryGrid.className = 'ms-trip-visual-grid';
+        categoryEntries.forEach(([cat,amount])=>{
+          const categoryCard = document.createElement('div');
+          categoryCard.className = 'ms-trip-category-card';
+          categoryCard.style.setProperty('--trip-category-color', COLORS[cat]||'#B8863F');
+          const sharePct = sum>0 ? Math.max(0, amount)/sum*100 : 0;
+          const barPct = Math.max(0, Math.min(100, amount/maxCategorySpend*100));
+          categoryCard.innerHTML = `
+            <span class="ms-trip-category-icon">${escapeHtml(ICONS[cat]||'❓')}</span>
+            <span class="ms-trip-category-name">${escapeHtml(cat)}</span>
+            <strong class="ms-trip-category-amount">${amount<0?'−':''}${fmt(amount)} ${curSym()}</strong>
+            <span class="ms-trip-category-share">${sharePct.toFixed(0)}% поїздки</span>
+            <span class="ms-trip-category-track"><span style="width:${barPct}%"></span></span>
+          `;
+          categoryGrid.appendChild(categoryCard);
         });
-        detailWrap.appendChild(scrollBox);
+        detailWrap.appendChild(categoryGrid);
+
+        const purchasesSection = document.createElement('div');
+        purchasesSection.className = 'ms-trip-purchases';
+        purchasesSection.innerHTML = '<h3>Покупки та коментарі</h3>';
+        const purchases = txs.map(t=>({
+          date:t.date, desc:t.desc, category:t.cat, amount:-Math.abs(t.amount), note:state.notes[txKey(t)]||''
+        }));
+        tripRefunds.forEach(r=>purchases.push({
+          date:r.date, desc:r.desc, category:categoryFor(r), amount:r.amount, refund:true, note:''
+        }));
+        purchases.sort((a,b)=>b.date-a.date).forEach(purchase=>{
+          const row = document.createElement('div');
+          row.className = 'ms-trip-purchase-row'+(purchase.refund?' is-refund':'');
+          row.innerHTML = `
+            <div class="ms-trip-purchase-top">
+              <span class="ms-trip-purchase-date">${dtStr(purchase.date)}</span>
+              <span class="ms-trip-purchase-category">${escapeHtml(ICONS[purchase.category]||'❓')} ${escapeHtml(purchase.category||'інше')}</span>
+              <strong class="ms-trip-purchase-amount">${purchase.amount>0?'+':'−'}${fmt(purchase.amount)} ${curSym()}</strong>
+            </div>
+            <div class="ms-trip-purchase-desc">${escapeHtml(purchase.desc)}</div>
+            ${purchase.note?`<div class="ms-trip-purchase-note">💬 ${escapeHtml(purchase.note)}</div>`:''}
+            ${purchase.refund?'<div class="ms-trip-purchase-note">Повернення</div>':''}
+          `;
+          purchasesSection.appendChild(row);
+        });
+        detailWrap.appendChild(purchasesSection);
       }
       card.appendChild(detailWrap);
     }
