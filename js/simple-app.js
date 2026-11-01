@@ -73,21 +73,22 @@ function categoryFor(t){
   return categorize(t.desc, t.mcc, t.amount, state.overrides, state.rules);
 }
 
-// Groups her fine-grained categories into the 4 buckets that actually matter when
-// looking back at a trip: where did the money go — housing, getting around, food, or
-// everything else (souvenirs, beauty, entertainment, etc.)
-function tripGroupFor(cat){
-  const housing = ['Путешествия - жилье'];
-  const transport = ['такси','транспорт','Путешествия транспорт: самолёт','Путешествия транспорт: кава в літаку',
-    'Путешествия транспорт: поезд','Путешествия транспорт: автобус','Путешествия транспорт: інше','авто','бензин'];
-  const food = ['продукти','продукти спільні','обеды'];
-  if(housing.includes(cat)) return 'Житло';
-  if(transport.includes(cat)) return 'Транспорт';
-  if(food.includes(cat)) return 'Їжа';
-  return 'Інше';
+// Explicit transaction assignment takes priority. Otherwise, a transaction falls
+// into the most specific event whose date range contains it.
+function eventIdFor(t){
+  const assigned = state.tripOf[txKey(t)];
+  if(assigned === 'none') return '';
+  if(assigned) return state.trips.some(event=>event.id===assigned) ? assigned : '';
+  const day = todayStr(t.date);
+  let best = null, bestLength = Infinity;
+  state.trips.forEach(event=>{
+    if(event.dateFrom && event.dateTo && day>=event.dateFrom && day<=event.dateTo){
+      const length = new Date(event.dateTo+'T00:00:00') - new Date(event.dateFrom+'T00:00:00');
+      if(length < bestLength){ best = event; bestLength = length; }
+    }
+  });
+  return best ? best.id : '';
 }
-const TRIP_GROUP_ORDER = ['Житло','Транспорт','Їжа','Інше'];
-const TRIP_GROUP_ICONS = {'Житло':'🏠','Транспорт':'🚌','Їжа':'🍽️','Інше':'🛍️'};
 
 // Shared handler for the category <select> wherever it appears. Asks whether the change
 // should apply only to this one purchase or to every purchase from that merchant — because
@@ -370,14 +371,17 @@ async function setTripDates(tripId, dateFrom, dateTo){
     alert('Дата має бути у форматі РРРР-ММ-ДД, наприклад 2026-06-10.');
     return;
   }
+  if(dateFrom > dateTo){
+    alert('Дата початку події не може бути пізніше дати завершення.');
+    return;
+  }
   trip.dateFrom = dateFrom;
   trip.dateTo = dateTo;
   render();
   await persistTrips();
 }
 async function assignTrip(key, tripId){
-  if(!tripId) delete state.tripOf[key];
-  else state.tripOf[key] = tripId;
+  state.tripOf[key] = tripId || 'none';
   render();
   await persistTrips();
 }
@@ -715,8 +719,7 @@ function ingestTransactions(items){
 }
 
 // Full-history expenses (across every period ever cached, not just what's currently
-// loaded/shown) — used for "Подорожі", since a trip's purchases can span months and
-// she shouldn't have to keep the exact right period loaded just to tag them.
+// loaded/shown) — used by summaries that need longer history than the selected period.
 function getAllHistoricalExpenses(){
   const fromCache = state.txCache
     .map(mapRawItem)
@@ -1158,6 +1161,33 @@ function resultsPanel(){
     });
     legend.appendChild(row);
 
+    if(cat==='продукти'){
+      const storeTotals = new Map();
+      (byCatTx[cat]||[]).forEach(t=>{
+        const name = (t.desc || '(без опису)').trim().replace(/\s+/g, ' ');
+        const key = name.toLocaleLowerCase('uk');
+        const existing = storeTotals.get(key);
+        if(existing) existing.amount += Math.abs(t.amount);
+        else storeTotals.set(key, {name, amount:Math.abs(t.amount)});
+      });
+      const stores = [...storeTotals.values()].sort((a,b)=>b.amount-a.amount);
+      if(stores.length){
+        const storeDetail = document.createElement('div');
+        storeDetail.className = 'ms-legend-detail ms-store-breakdown';
+        const heading = document.createElement('div');
+        heading.className = 'ms-store-breakdown-title';
+        heading.textContent = 'Витрати по магазинах';
+        storeDetail.appendChild(heading);
+        stores.forEach(store=>{
+          const storeRow = document.createElement('div');
+          storeRow.className = 'ms-store-breakdown-row';
+          storeRow.innerHTML = `<span>${escapeHtml(store.name)}</span><span>${fmt(store.amount)} ${curSym()}</span>`;
+          storeDetail.appendChild(storeRow);
+        });
+        legend.appendChild(storeDetail);
+      }
+    }
+
     if(expanded){
       const detail = document.createElement('div');
       detail.className = 'ms-legend-detail';
@@ -1191,12 +1221,12 @@ function resultsPanel(){
 
   const panel2 = document.createElement('div');
   panel2.className='ms-panel';
-  panel2.innerHTML = `<h2>Всі операції</h2><p class="ms-hint">Категорію можна змінити прямо тут — вибір запам'ятається для цього мерчанта надалі. Іконкою 📝 можна додати нотатку до конкретної покупки — що це було насправді. Галочка «чисто» — познач, якщо це насправді не витрата (повернули гроші, поповнення фонду тощо).</p>
+  panel2.innerHTML = `<h2>Всі операції</h2><p class="ms-hint">Категорію можна змінити прямо тут — вибір запам'ятається для цього мерчанта надалі. У колонці «Подія» можна об'єднати витрати за спільною подією. Іконкою 📝 можна додати нотатку до покупки. Галочка «чисто» — познач, якщо це насправді не витрата (повернення, поповнення фонду тощо).</p>
     <div class="ms-field" style="margin-bottom:10px">
       <input type="text" id="txSearchInput" placeholder="Пошук за описом або власною нотаткою…" value="${escapeHtml(state.txSearchQuery||'')}">
     </div>
     <div style="font-size:13px;color:var(--muted);margin-bottom:12px" id="txSearchSummary">Разом витрачено: <b style="color:var(--gold);font-family:var(--font-mono)">${fmt(total)} ${curSym()}</b>${fmtEur(total, curCode())} · ${all.length} операцій</div>
-    <div class="ms-table-wrap"><table class="ms-tx"><thead><tr><th>Дата</th><th>Опис</th><th>Категорія</th><th title="Не витрата">Чисто</th><th style="text-align:right">Сума</th></tr></thead><tbody id="txBody"></tbody></table></div>`;
+    <div class="ms-table-wrap"><table class="ms-tx"><thead><tr><th>Дата</th><th>Опис</th><th>Категорія</th><th>Подія</th><th title="Не витрата">Чисто</th><th style="text-align:right">Сума</th></tr></thead><tbody id="txBody"></tbody></table></div>`;
   const tbody = panel2.querySelector('#txBody');
   all.sort((a,b)=>b.date-a.date).forEach(t=>{
     const tr = document.createElement('tr');
@@ -1219,7 +1249,7 @@ function resultsPanel(){
       handleCategoryChange(t, e.target.value);
     });
 
-    tr.innerHTML = `<td>${dateStr}${t.manual?' <span class="ms-tag">ручне</span>':''}</td><td></td><td></td><td style="text-align:center"></td><td style="text-align:right" class="ms-amt-neg">−${fmt(t.amount)}</td>`;
+    tr.innerHTML = `<td>${dateStr}${t.manual?' <span class="ms-tag">ручне</span>':''}</td><td></td><td></td><td></td><td style="text-align:center"></td><td style="text-align:right" class="ms-amt-neg">−${fmt(t.amount)}</td>`;
 
     const descCell = tr.children[1];
     const descLine = document.createElement('div');
@@ -1246,7 +1276,29 @@ function resultsPanel(){
     catCell.style.alignItems = 'center';
     catCell.appendChild(sel);
 
-    const cleanCell = tr.children[3];
+    const eventCell = tr.children[3];
+    if(state.trips.length===0){
+      eventCell.innerHTML = '<span style="color:var(--muted);font-size:11px">—</span>';
+    }else{
+      const eventSelect = document.createElement('select');
+      eventSelect.className = 'ms-cat-select';
+      const noneOption = document.createElement('option');
+      noneOption.value = '';
+      noneOption.textContent = '—';
+      eventSelect.appendChild(noneOption);
+      state.trips.forEach(event=>{
+        const option = document.createElement('option');
+        option.value = event.id;
+        option.textContent = event.name;
+        if(eventIdFor(t)===event.id) option.selected = true;
+        eventSelect.appendChild(option);
+      });
+      eventSelect.title = 'Прив’язати витрату до події';
+      eventSelect.addEventListener('change', e=>assignTrip(key, e.target.value));
+      eventCell.appendChild(eventSelect);
+    }
+
+    const cleanCell = tr.children[4];
     const cleanChk = document.createElement('input');
     cleanChk.type = 'checkbox';
     cleanChk.checked = isNotExpense;
@@ -1379,10 +1431,9 @@ function resultsPanel(){
   panel3.style.marginBottom = '14px';
   wrap.appendChild(panel3);
 
-  // named supermarket chains — total spent at each, across the whole cached history
-  const panelSupermarkets = buildSupermarketsPanel(all);
-  panelSupermarkets.style.marginBottom = '14px';
-  wrap.appendChild(panelSupermarkets);
+  const panelEvents = buildEventsPanel(all);
+  panelEvents.style.marginBottom = '14px';
+  wrap.appendChild(panelEvents);
 
   // monthly comparison bar chart — full history, own full-width row
   const panelMonthly = buildMonthlyBarChart();
@@ -1390,74 +1441,6 @@ function resultsPanel(){
   wrap.appendChild(panelMonthly);
 
   p.appendChild(wrap);
-  return p;
-}
-
-// Tracks a fixed set of named supermarket chains (not a generic "all merchants" list —
-// specifically the big Ukrainian grocery chains) and totals spending at each across the
-// ENTIRE cached history, not just the currently selected period, since the point is
-// "how much have I spent at NOVUS overall", not "this month only".
-function buildSupermarketsPanel(all){
-  const p = document.createElement('div');
-  p.className = 'ms-panel';
-
-  const CHAINS = [
-    {label:'Фора', match:['фора','fora']},
-    {label:'АТБ', match:['атб','atb']},
-    {label:'NOVUS', match:['novus','новус']},
-    {label:'Сільпо', match:['сільпо','silpo']},
-  ];
-
-  const totals = CHAINS.map(chain=>{
-    const txs = all.filter(t=>{
-      const d = t.desc.toLowerCase();
-      return chain.match.some(m=>d.includes(m));
-    });
-    return { label: chain.label, sum: txs.reduce((s,t)=>s+Math.abs(t.amount),0), count: txs.length, txs };
-  });
-  const grandTotal = totals.reduce((s,t)=>s+t.sum,0);
-
-  p.innerHTML = `<h2>Супермаркети</h2><p class="ms-hint">Скільки витрачено в кожній із цих мереж за поточний обраний період. Клікни на рядок, щоб побачити самі операції.</p><div id="supermarketRows"></div>`;
-  const rowsWrap = p.querySelector('#supermarketRows');
-  totals.forEach(t=>{
-    const expanded = !!state.expandedSupermarkets[t.label];
-    const row = document.createElement('div');
-    row.className = 'ms-legend-row'+(t.count?' ms-legend-row-clickable':'');
-    row.innerHTML = `<span class="ms-legend-chevron">${t.count ? (expanded?'▾':'▸') : ''}</span>
-      <span class="ms-legend-cat">${t.label}</span>
-      <span class="ms-legend-amt">${t.count} оп.</span>
-      <span class="ms-legend-amt" style="color:var(--gold);min-width:80px;text-align:right">${fmt(t.sum)} ${curSym()}</span>`;
-    if(t.count){
-      row.addEventListener('click', ()=>{
-        state.expandedSupermarkets[t.label] = !state.expandedSupermarkets[t.label];
-        render();
-      });
-    }
-    rowsWrap.appendChild(row);
-
-    if(expanded && t.count){
-      const detail = document.createElement('div');
-      detail.className = 'ms-legend-detail';
-      [...t.txs].sort((a,b)=>b.date-a.date).forEach(tx=>{
-        const dateStr = tx.date.toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'});
-        const dRow = document.createElement('div');
-        dRow.className = 'ms-legend-detail-row';
-        dRow.innerHTML = `<span style="min-width:40px;color:var(--muted)">${dateStr}</span><span style="flex:1">${escapeHtml(tx.desc)}</span><span class="ms-amt-neg">−${fmt(tx.amount)} ${curSym()}</span>`;
-        detail.appendChild(dRow);
-      });
-      rowsWrap.appendChild(detail);
-    }
-  });
-  if(grandTotal>0){
-    const totalRow = document.createElement('div');
-    totalRow.className = 'ms-today-cat-row';
-    totalRow.style.fontWeight = '600';
-    totalRow.style.borderTop = '1px solid var(--line)';
-    totalRow.style.marginTop = '4px';
-    totalRow.style.paddingTop = '8px';
-    totalRow.innerHTML = `<span class="ms-today-cat-name">Разом</span><span></span><span class="ms-today-cat-amt" style="min-width:80px;text-align:right">${fmt(grandTotal)} ${curSym()}</span>`;
-    rowsWrap.appendChild(totalRow);
-  }
   return p;
 }
 
@@ -1773,24 +1756,24 @@ function buildDataTransferPanel(){
   return p;
 }
 
-function buildTripsPanel(all){
+function buildEventsPanel(all){
   const p = document.createElement('div');
   p.className = 'ms-panel ms-trips-panel';
   p.innerHTML = `
-    <h2>🧳 Подорожі — окремий облік витрат по поїздках</h2>
-    <p class="ms-hint">Створи поїздку тут, а сам зв'язок з операціями роби у колонці «Поїздка» в таблиці «Всі операції» вище — обери там потрібну поїздку у випадаючому списку конкретної покупки. Тут — тільки підсумок по кожній поїздці.</p>
+    <h2>🏷️ Події — окремий облік пов’язаних витрат</h2>
+    <p class="ms-hint">Створи подію, наприклад «День народження» чи «Ремонт». За бажанням задай дати — операції в цьому проміжку будуть додані автоматично. Також можна призначати подію вручну для кожної витрати у колонці «Подія».</p>
     <div class="ms-manual-form">
-      <div class="ms-field" style="flex:2"><label>Назва поїздки</label><input type="text" id="tripName" placeholder="Наприклад: Польща, липень"></div>
-      <button class="ms-btn" id="tripAdd" style="align-self:flex-end">Створити поїздку</button>
+      <div class="ms-field" style="flex:2"><label>Назва події</label><input type="text" id="tripName" placeholder="Наприклад: День народження"></div>
+      <button class="ms-btn" id="tripAdd" style="align-self:flex-end">Створити подію</button>
     </div>
     <div id="tripsList" style="margin-top:16px"></div>
   `;
   const list = p.querySelector('#tripsList');
   if(state.trips.length===0){
-    list.innerHTML = '<p class="ms-hint" style="margin:0">Поїздок ще немає — створи першу вище.</p>';
+    list.innerHTML = '<p class="ms-hint" style="margin:0">Подій ще немає — створи першу вище.</p>';
   }
   state.trips.forEach(trip=>{
-    const txs = all.filter(t=>state.tripOf[txKey(t)]===trip.id);
+    const txs = all.filter(t=>eventIdFor(t)===trip.id);
     const sum = txs.reduce((s,t)=>s+Math.abs(t.amount),0);
     const expanded = !!state.expandedTrips?.[trip.id];
 
@@ -1798,20 +1781,13 @@ function buildTripsPanel(all){
     let dayCount = 0;
     const fmtD = d=>d.toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'});
     if(trip.dateFrom && trip.dateTo){
-      // manually set — takes priority over any automatic guess
       const minD = new Date(trip.dateFrom+'T00:00:00');
       const maxD = new Date(trip.dateTo+'T00:00:00');
       dateRangeStr = trip.dateFrom===trip.dateTo ? fmtD(minD) : `${fmtD(minD)} – ${fmtD(maxD)}`;
       dayCount = Math.round((maxD.getTime() - minD.getTime())/(24*60*60*1000)) + 1;
     }else{
-      // tickets/hotels booked ahead of time are often charged in UAH from home,
-      // which skews the date range if we just use every tagged transaction. Prefer
-      // foreign-currency transactions (actual spend while abroad) for the real dates;
-      // fall back to everything if the trip has no foreign-currency spend at all.
-      const abroadTxs = txs.filter(t=>t.currency && t.currency!==980);
-      const dateSourceTxs = abroadTxs.length ? abroadTxs : txs;
-      if(dateSourceTxs.length){
-        const dates = dateSourceTxs.map(t=>t.date.getTime());
+      if(txs.length){
+        const dates = txs.map(t=>t.date.getTime());
         const minD = new Date(Math.min(...dates));
         const maxD = new Date(Math.max(...dates));
         dateRangeStr = minD.toDateString()===maxD.toDateString() ? fmtD(minD) : `${fmtD(minD)} – ${fmtD(maxD)}`;
@@ -1832,7 +1808,7 @@ function buildTripsPanel(all){
       <span class="ms-trip-sum">${fmt(sum)} ${curSym()}</span>
     `;
     head.addEventListener('click', (e)=>{
-      if(e.target.closest('.ms-btn')) return;
+      if(e.target.closest('.ms-btn, .ms-icon-btn')) return;
       state.expandedTrips = state.expandedTrips || {};
       state.expandedTrips[trip.id] = !expanded;
       render();
@@ -1840,16 +1816,16 @@ function buildTripsPanel(all){
     const renameBtn = document.createElement('button');
     renameBtn.className = 'ms-icon-btn';
     renameBtn.textContent = '✏️';
-    renameBtn.title = 'Перейменувати поїздку';
+    renameBtn.title = 'Перейменувати подію';
     renameBtn.addEventListener('click', ()=>{
-      const newName = prompt('Нова назва поїздки:', trip.name);
+      const newName = prompt('Нова назва події:', trip.name);
       renameTrip(trip.id, newName);
     });
     head.appendChild(renameBtn);
     const datesBtn = document.createElement('button');
     datesBtn.className = 'ms-icon-btn';
     datesBtn.textContent = '📅';
-    datesBtn.title = 'Задати дати поїздки вручну';
+    datesBtn.title = 'Задати дати події';
     datesBtn.addEventListener('click', ()=>{
       state.editingTripDates = state.editingTripDates===trip.id ? null : trip.id;
       render();
@@ -1858,9 +1834,9 @@ function buildTripsPanel(all){
     const delBtn = document.createElement('button');
     delBtn.className = 'ms-icon-btn';
     delBtn.textContent = '🗑️';
-    delBtn.title = 'Видалити поїздку';
+    delBtn.title = 'Видалити подію';
     delBtn.addEventListener('click', ()=>{
-      if(confirm(`Видалити поїздку «${trip.name}»? Прив'язки трат до неї теж знімуться (самі трати нікуди не дінуться).`)) deleteTrip(trip.id);
+      if(confirm(`Видалити подію «${trip.name}»? Її прив'язки до витрат теж знімуться.`)) deleteTrip(trip.id);
     });
     head.appendChild(delBtn);
     card.appendChild(head);
@@ -1871,11 +1847,11 @@ function buildTripsPanel(all){
       dateForm.style.cssText = 'margin:10px 0;align-items:flex-end;gap:10px;flex-wrap:wrap';
       dateForm.innerHTML = `
         <div class="ms-field" style="max-width:170px">
-          <label>Початок поїздки</label>
+          <label>Початок події</label>
           <input type="date" id="tripDateFromInput" value="${trip.dateFrom || todayStr()}">
         </div>
         <div class="ms-field" style="max-width:170px">
-          <label>Кінець поїздки</label>
+          <label>Кінець події</label>
           <input type="date" id="tripDateToInput" value="${trip.dateTo || todayStr()}">
         </div>
         <button class="ms-btn" id="tripDateSaveBtn">Зберегти</button>
@@ -1898,24 +1874,24 @@ function buildTripsPanel(all){
       const detailWrap = document.createElement('div');
       detailWrap.className = 'ms-trip-pick';
       if(txs.length===0){
-        detailWrap.innerHTML = '<p class="ms-hint" style="margin:10px 0">Ще нічого не прив\'язано — познач операції в «Всі операції» вище.</p>';
+        detailWrap.innerHTML = '<p class="ms-hint" style="margin:10px 0">До події ще не додано витрат. Признач їх у колонці «Подія» або задай дати.</p>';
       }else{
-        detailWrap.innerHTML = `<p class="ms-hint" style="margin:10px 0">Згруповано за типом витрати (щоб прибрати операцію — онови її поїздку на «—» в «Всі операції»):</p>`;
+        detailWrap.innerHTML = `<p class="ms-hint" style="margin:10px 0">Витрати події за категоріями:</p>`;
         const byGroup = {};
         txs.forEach(t=>{
-          const g = tripGroupFor(t.cat);
+          const g = t.cat;
           (byGroup[g] = byGroup[g]||[]).push(t);
         });
         const scrollBox = document.createElement('div');
         scrollBox.className = 'ms-trip-scroll';
-        TRIP_GROUP_ORDER.filter(g=>byGroup[g]).forEach(g=>{
+        Object.keys(byGroup).sort((a,b)=>byGroup[b].reduce((s,t)=>s+Math.abs(t.amount),0)-byGroup[a].reduce((s,t)=>s+Math.abs(t.amount),0)).forEach(g=>{
           const groupTxs = byGroup[g].sort((a,b)=>b.date-a.date);
           const groupSum = groupTxs.reduce((s,t)=>s+Math.abs(t.amount),0);
           const groupHead = document.createElement('div');
           groupHead.className = 'ms-trip-pick-row';
           groupHead.style.fontWeight = '600';
           groupHead.style.background = 'var(--panel-hi)';
-          groupHead.innerHTML = `<span class="ms-trip-pick-desc">${TRIP_GROUP_ICONS[g]} ${g}</span><span class="ms-trip-pick-amt">${fmt(groupSum)} ${curSym()}</span>`;
+          groupHead.innerHTML = `<span class="ms-trip-pick-desc">${ICONS[g]||'❓'} ${escapeHtml(g)}</span><span class="ms-trip-pick-amt">${fmt(groupSum)} ${curSym()}</span>`;
           scrollBox.appendChild(groupHead);
           groupTxs.forEach(t=>{
             const dateStr = t.date.toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'});
