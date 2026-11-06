@@ -2582,6 +2582,13 @@ function buildTripsPanel(all){
       }else{
         detailWrap.innerHTML = `<p class="ms-hint" style="margin:10px 0">Витрати по категоріях; суми враховують повернення.</p>`;
 
+        const byCatTxs = {};
+        txs.forEach(t=>{ (byCatTxs[t.cat] = byCatTxs[t.cat]||[]).push(t); });
+        const refundsByExactCat = {};
+        tripRefunds.forEach(r=>{
+          const category = categoryFor(r);
+          (refundsByExactCat[category] = refundsByExactCat[category]||[]).push(r);
+        });
         const categoryEntries = Object.entries(byExactCat)
           .sort((a,b)=>b[1]-a[1] || a[0].localeCompare(b[0],'uk'));
         const categoryGrid = document.createElement('div');
