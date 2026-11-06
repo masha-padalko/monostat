@@ -2563,19 +2563,8 @@ function buildTripsPanel(all){
       }else{
         detailWrap.innerHTML = `<p class="ms-hint" style="margin:10px 0">Витрати по категоріях; суми враховують повернення.</p>`;
 
-        const categoryPriority = cat=>{
-          const name = (cat||'').toLocaleLowerCase('uk');
-          if(/громадський транспорт/.test(name)) return 2;
-          if(/житло|готел|хостел|проживан|квартир/.test(name)) return 1;
-          if(/обід|кафе|ресторан/.test(name)) return 3;
-          if(/продукт/.test(name)) return 4;
-          if(/транспорт|таксі|літак|авіа|потяг|автобус|пальне|авто|bolt|uber|uklon/.test(name)) return 0;
-          return 5;
-        };
-        const categoryEntries = Object.entries(byExactCat).sort((a,b)=>{
-          const priorityDiff = categoryPriority(a[0])-categoryPriority(b[0]);
-          return priorityDiff || b[1]-a[1] || a[0].localeCompare(b[0],'uk');
-        });
+        const categoryEntries = Object.entries(byExactCat)
+          .sort((a,b)=>b[1]-a[1] || a[0].localeCompare(b[0],'uk'));
         const categoryGrid = document.createElement('div');
         categoryGrid.className = 'ms-trip-visual-grid';
         categoryEntries.forEach(([cat,amount])=>{
@@ -2593,6 +2582,7 @@ function buildTripsPanel(all){
         const totalCard = document.createElement('div');
         totalCard.className = 'ms-trip-total-card';
         totalCard.innerHTML = `
+          <img class="ms-trip-cover-image" src="https://www.vash-otdyh.by/images/Blog/Turkey/Istanbul/%D0%9C%D0%B5%D1%87%D0%B5%D1%82%D1%8C_%D0%A1%D1%83%D0%BB%D1%82%D0%B0%D0%BD%D0%B0%D1%85%D0%BC%D0%B5%D1%82_%D0%B2_%D0%A1%D1%82%D0%B0%D0%BC%D0%B1%D1%83%D0%BB%D0%B5.jpg" alt="Стамбул — мечеть Султанахмет">
           <span class="ms-trip-total-label">Разом за подорож</span>
           <strong class="ms-trip-total-amount">${fmt(sum)} ${curSym()}</strong>
         `;
