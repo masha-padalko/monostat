@@ -364,7 +364,7 @@
   .ms-trip-meta{color:var(--muted);font-size:11.5px;}
   .ms-trip-sum{font-family:var(--font-mono);color:var(--gold);font-weight:600;font-size:14px;}
   .ms-trip-pick{padding:0 14px 14px;}
-  .ms-trip-visual-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:10px;margin:12px 0 20px;}
+  .ms-trip-visual-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:12px 0 20px;}
   .ms-trip-category-card{
     display:flex;flex-direction:column;align-items:flex-start;gap:5px;min-width:0;
     padding:13px;border:1px solid var(--line);border-top:3px solid var(--trip-category-color);
@@ -374,6 +374,7 @@
   .ms-trip-category-name{font-size:12px;color:var(--muted);overflow-wrap:anywhere;}
   .ms-trip-category-amount{font-family:var(--font-mono);font-size:17px;color:var(--text);}
   .ms-trip-category-share{font-size:10px;color:var(--muted);}
+  .ms-trip-category-details{font-size:10px;color:var(--muted);line-height:1.4;overflow-wrap:anywhere;}
   .ms-trip-category-track{height:5px;width:100%;margin-top:4px;overflow:hidden;border-radius:99px;background:var(--line);}
   .ms-trip-category-track span{display:block;height:100%;border-radius:inherit;background:var(--trip-category-color);}
   .ms-trip-purchases{border-top:1px solid var(--line);padding-top:12px;}
@@ -388,6 +389,8 @@
   .ms-trip-purchase-note{font-size:11px;color:var(--gold);margin:4px 0 0 2px;white-space:pre-wrap;overflow-wrap:anywhere;}
   .ms-trip-purchase-row.is-refund .ms-trip-purchase-amount,
   .ms-trip-purchase-row.is-refund .ms-trip-purchase-note{color:var(--teal);}
+  @media(max-width:680px){.ms-trip-visual-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}
+  @media(max-width:420px){.ms-trip-visual-grid{grid-template-columns:1fr;}}
   .ms-spin{
     display:inline-block;width:13px;height:13px;border-radius:50%;
     border:2px solid rgba(74,54,35,.2);border-top-color:#FFFCF5;
