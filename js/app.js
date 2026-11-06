@@ -93,20 +93,6 @@ function categoryFor(t){
   return categorize(t.desc, t.mcc, t.amount, state.overrides, state.rules);
 }
 
-function tripSpendGroupFor(category, description=''){
-  const text = `${category||''} ${description||''}`.toLocaleLowerCase('uk');
-  if(/жиль|житл|готел|отел|hotel|hostel|airbnb|booking\.com|проживан|квартир/.test(text)) return 'Житло';
-  if(/такси|транспорт|самол|літак|авіа|поезд|поїзд|автобус|тролейбус|трамва|метро|бензин|авто|bolt|uber|uklon/.test(text)) return 'Транспорт';
-  if(/продукт|обед|їж|еда|кафе|ресторан|кав|coffee|restaurant|grocery/.test(text)) return 'Їжа';
-  return 'Інше';
-}
-const TRIP_SPEND_GROUPS = [
-  {name:'Житло', icon:'🏨', color:'#8C6FA8'},
-  {name:'Транспорт', icon:'🚆', color:'#4E9C82'},
-  {name:'Їжа', icon:'🍽️', color:'#C9A24B'},
-  {name:'Інше', icon:'🛍️', color:'#B7734F'}
-];
-
 // Shared handler for the category <select> wherever it appears. Asks whether the change
 // should apply only to this one purchase or to every purchase from that merchant — because
 // by default a category change is merchant-wide, which surprised her when one supermarket
@@ -2489,38 +2475,33 @@ function buildTripsPanel(all){
       }else{
         detailWrap.innerHTML = `<p class="ms-hint" style="margin:10px 0">Витрати по категоріях; суми враховують повернення.</p>`;
 
-        const tripGroupTotals = new Map(TRIP_SPEND_GROUPS.map(group=>[group.name, {amount:0, categories:new Set()}]));
-        txs.forEach(t=>{
-          const group = tripGroupTotals.get(tripSpendGroupFor(t.cat, t.desc));
-          group.amount += Math.abs(t.amount);
-          group.categories.add(t.cat);
+        const categoryPriority = cat=>{
+          const name = (cat||'').toLocaleLowerCase('uk');
+          if(/общественный транспорт|громадський транспорт/.test(name)) return 2;
+          if(/жиль|житл|hotel|hostel|airbnb|booking\.com|проживан|квартир/.test(name)) return 1;
+          if(/обед|кафе|ресторан/.test(name)) return 3;
+          if(/продукт/.test(name)) return 4;
+          if(/транспорт|такси|самол|літак|авіа|поезд|поїзд|автобус|бензин|авто|bolt|uber|uklon/.test(name)) return 0;
+          return 5;
+        };
+        const categoryEntries = Object.entries(byExactCat).sort((a,b)=>{
+          const priorityDiff = categoryPriority(a[0])-categoryPriority(b[0]);
+          return priorityDiff || b[1]-a[1] || a[0].localeCompare(b[0],'uk');
         });
-        tripRefunds.forEach(r=>{
-          const category = categoryFor(r);
-          const group = tripGroupTotals.get(tripSpendGroupFor(category, r.desc));
-          group.amount -= r.amount;
-          group.categories.add(category);
-        });
-        const groupEntries = TRIP_SPEND_GROUPS
-          .map(group=>({...group, ...tripGroupTotals.get(group.name)}))
-          .filter(group=>group.amount>0)
-          .sort((a,b)=>b.amount-a.amount);
-        const maxCategorySpend = Math.max(1, ...groupEntries.map(group=>group.amount));
+        const maxCategorySpend = Math.max(1, ...categoryEntries.map(([,amount])=>amount));
         const categoryGrid = document.createElement('div');
         categoryGrid.className = 'ms-trip-visual-grid';
-        groupEntries.forEach(group=>{
+        categoryEntries.forEach(([cat,amount])=>{
           const categoryCard = document.createElement('div');
           categoryCard.className = 'ms-trip-category-card';
-          categoryCard.style.setProperty('--trip-category-color', group.color);
-          const sharePct = sum>0 ? group.amount/sum*100 : 0;
-          const barPct = Math.max(0, Math.min(100, group.amount/maxCategorySpend*100));
-          const categoryNames = [...group.categories].filter(Boolean).map(cat=>`${ICONS[cat]||'❓'} ${cat}`).join(' · ');
+          categoryCard.style.setProperty('--trip-category-color', COLORS[cat]||'#B8863F');
+          const sharePct = sum>0 ? Math.max(0, amount)/sum*100 : 0;
+          const barPct = Math.max(0, Math.min(100, amount/maxCategorySpend*100));
           categoryCard.innerHTML = `
-            <span class="ms-trip-category-icon">${group.icon}</span>
-            <span class="ms-trip-category-name">${group.name}</span>
-            <strong class="ms-trip-category-amount">${group.amount<0?'−':''}${fmt(group.amount)} ${curSym()}</strong>
+            <span class="ms-trip-category-icon">${escapeHtml(ICONS[cat]||'❓')}</span>
+            <span class="ms-trip-category-name">${escapeHtml(cat)}</span>
+            <strong class="ms-trip-category-amount">${amount<0?'−':''}${fmt(amount)} ${curSym()}</strong>
             <span class="ms-trip-category-share">${sharePct.toFixed(0)}% поїздки</span>
-            ${categoryNames?`<span class="ms-trip-category-details">${escapeHtml(categoryNames)}</span>`:''}
             <span class="ms-trip-category-track"><span style="width:${barPct}%"></span></span>
           `;
           categoryGrid.appendChild(categoryCard);
