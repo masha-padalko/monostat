@@ -167,6 +167,7 @@ let state = {
   trips: [],          // [{id, name}] — named trips she can tag transactions with
   tripOf: {},          // txKey -> tripId
   expandedTrips: {},    // tripId -> bool, which trip cards are open
+  expandedTripCategories: {}, // `${tripId}|${category}` -> bool
   customCats: [],     // user-added categories: [{name, icon}] — window.MonoStatDefaults.DEFAULT_CUSTOM_CATS applied below
   step: 'connect',   // connect -> accounts -> results
   manualJsonMode: false,
@@ -2580,28 +2581,66 @@ function buildTripsPanel(all){
         const categoryGrid = document.createElement('div');
         categoryGrid.className = 'ms-trip-visual-grid';
         categoryEntries.forEach(([cat,amount])=>{
+          const categoryTxs = byCatTxs[cat]||[];
+          const categoryRefunds = refundsByExactCat[cat]||[];
+          const categoryKey = `${trip.id}|${cat}`;
+          const categoryExpanded = !!state.expandedTripCategories[categoryKey];
           const categoryCard = document.createElement('div');
-          categoryCard.className = 'ms-trip-category-card';
+          categoryCard.className = 'ms-trip-category-card ms-trip-category-clickable'+(categoryExpanded?' is-expanded':'');
+          categoryCard.tabIndex = 0;
+          categoryCard.setAttribute('role','button');
+          categoryCard.setAttribute('aria-expanded', String(categoryExpanded));
           categoryCard.style.setProperty('--trip-category-color', COLORS[cat]||'#B8863F');
           categoryCard.innerHTML = `
             <span class="ms-trip-category-icon">${escapeHtml(ICONS[cat]||'❓')}</span>
             <span class="ms-trip-category-name">${escapeHtml(cat)}</span>
             <strong class="ms-trip-category-amount">${amount<0?'−':''}${fmt(amount)} ${curSym()}</strong>
             <span class="ms-trip-category-track" aria-hidden="true"></span>
+            <span class="ms-trip-category-hint">${categoryExpanded?'Згорнути':'Переглянути витрати'} ▾</span>
           `;
+          const toggleCategory = ()=>{
+            state.expandedTripCategories[categoryKey] = !categoryExpanded;
+            render();
+          };
+          categoryCard.addEventListener('click', toggleCategory);
+          categoryCard.addEventListener('keydown', e=>{
+            if(e.key==='Enter'||e.key===' '){ e.preventDefault(); toggleCategory(); }
+          });
           const categoryNote = (trip.categoryNotes?.[cat] || '').trim();
           if(categoryNote){
             const note = document.createElement('span');
             note.className = 'ms-trip-category-note';
             note.textContent = `💬 ${categoryNote}`;
+            note.addEventListener('click', e=>e.stopPropagation());
             categoryCard.appendChild(note);
           }
           const noteButton = document.createElement('button');
           noteButton.type = 'button';
           noteButton.className = 'ms-trip-category-note-button';
           noteButton.textContent = categoryNote ? 'Змінити коментар' : '+ Коментар';
+          noteButton.setAttribute('aria-expanded', String(categoryExpanded));
+          noteButton.addEventListener('click', e=>e.stopPropagation());
           noteButton.addEventListener('click', ()=>setTripCategoryNote(trip.id, cat));
           categoryCard.appendChild(noteButton);
+
+          if(categoryExpanded){
+            const transactionList = document.createElement('div');
+            transactionList.className = 'ms-trip-category-transactions';
+            transactionList.addEventListener('click', e=>e.stopPropagation());
+            categoryTxs.slice().sort((a,b)=>b.date-a.date).forEach(t=>{
+              const row = document.createElement('div');
+              row.className = 'ms-trip-category-transaction';
+              row.innerHTML = `<span>${dtStr(t.date)} · ${escapeHtml(t.desc)}</span><strong>−${fmt(Math.abs(t.amount))} ${curSym()}</strong>${state.notes[txKey(t)]?`<small>💬 ${escapeHtml(state.notes[txKey(t)])}</small>`:''}`;
+              transactionList.appendChild(row);
+            });
+            categoryRefunds.slice().sort((a,b)=>b.date-a.date).forEach(r=>{
+              const row = document.createElement('div');
+              row.className = 'ms-trip-category-transaction is-refund';
+              row.innerHTML = `<span>↩ ${dtStr(r.date)} · ${escapeHtml(r.desc)} (повернення)</span><strong>+${fmt(r.amount)} ${curSym()}</strong>`;
+              transactionList.appendChild(row);
+            });
+            categoryCard.appendChild(transactionList);
+          }
           categoryGrid.appendChild(categoryCard);
         });
         const totalCard = document.createElement('div');
@@ -2631,31 +2670,6 @@ function buildTripsPanel(all){
         summaryLayout.appendChild(totalCard);
         detailWrap.appendChild(summaryLayout);
 
-        const purchasesSection = document.createElement('div');
-        purchasesSection.className = 'ms-trip-purchases';
-        purchasesSection.innerHTML = '<h3>Покупки та коментарі</h3>';
-        const purchases = txs.map(t=>({
-          date:t.date, desc:t.desc, category:t.cat, amount:-Math.abs(t.amount), note:state.notes[txKey(t)]||''
-        }));
-        tripRefunds.forEach(r=>purchases.push({
-          date:r.date, desc:r.desc, category:categoryFor(r), amount:r.amount, refund:true, note:''
-        }));
-        purchases.sort((a,b)=>b.date-a.date).forEach(purchase=>{
-          const row = document.createElement('div');
-          row.className = 'ms-trip-purchase-row'+(purchase.refund?' is-refund':'');
-          row.innerHTML = `
-            <div class="ms-trip-purchase-top">
-              <span class="ms-trip-purchase-date">${dtStr(purchase.date)}</span>
-              <span class="ms-trip-purchase-category">${escapeHtml(ICONS[purchase.category]||'❓')} ${escapeHtml(purchase.category||'інше')}</span>
-              <strong class="ms-trip-purchase-amount">${purchase.amount>0?'+':'−'}${fmt(purchase.amount)} ${curSym()}</strong>
-            </div>
-            <div class="ms-trip-purchase-desc">${escapeHtml(purchase.desc)}</div>
-            ${purchase.note?`<div class="ms-trip-purchase-note">💬 ${escapeHtml(purchase.note)}</div>`:''}
-            ${purchase.refund?'<div class="ms-trip-purchase-note">Повернення</div>':''}
-          `;
-          purchasesSection.appendChild(row);
-        });
-        detailWrap.appendChild(purchasesSection);
       }
       card.appendChild(detailWrap);
     }

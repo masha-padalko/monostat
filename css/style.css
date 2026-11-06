@@ -371,10 +371,21 @@
     padding:13px;border:1px solid var(--line);border-top:3px solid var(--trip-category-color);
     border-radius:12px;background:linear-gradient(145deg,var(--panel),var(--bg));
   }
+  .ms-trip-category-clickable{cursor:pointer;transition:transform .12s,box-shadow .12s;}
+  .ms-trip-category-clickable:hover,.ms-trip-category-clickable:focus-visible{transform:translateY(-2px);box-shadow:0 5px 14px rgba(74,54,35,.1);outline:none;}
+  .ms-trip-category-clickable.is-expanded{grid-column:span 2;}
   .ms-trip-category-icon{font-size:32px;line-height:1.1;filter:drop-shadow(0 2px 2px rgba(74,54,35,.12));}
   .ms-trip-category-name{font-size:12px;color:var(--muted);overflow-wrap:anywhere;}
   .ms-trip-category-amount{font-family:var(--font-mono);font-size:17px;color:var(--text);}
   .ms-trip-category-track{display:block;height:5px;width:100%;margin-top:4px;border-radius:99px;background:var(--trip-category-color);}
+  .ms-trip-category-hint{font-size:10px;color:var(--gold);}
+  .ms-trip-category-transactions{width:100%;margin-top:8px;padding-top:6px;border-top:1px solid var(--line);}
+  .ms-trip-category-transaction{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 8px;padding:6px 0;border-bottom:1px solid var(--line);font-size:10px;line-height:1.4;}
+  .ms-trip-category-transaction:last-child{border-bottom:0;}
+  .ms-trip-category-transaction>span{min-width:0;overflow-wrap:anywhere;color:var(--text);}
+  .ms-trip-category-transaction>strong{font-family:var(--font-mono);font-size:10px;white-space:nowrap;color:var(--rust);}
+  .ms-trip-category-transaction>small{grid-column:1/-1;color:var(--muted);white-space:pre-wrap;overflow-wrap:anywhere;}
+  .ms-trip-category-transaction.is-refund>span,.ms-trip-category-transaction.is-refund>strong{color:var(--teal);}
   .ms-trip-category-note{font-size:10px;line-height:1.4;color:var(--muted);white-space:pre-wrap;overflow-wrap:anywhere;}
   .ms-trip-category-note-button{border:0;padding:2px 0;background:none;color:var(--gold);font:inherit;font-size:10px;cursor:pointer;text-align:left;}
   .ms-trip-category-note-button:hover{text-decoration:underline;}
@@ -397,8 +408,8 @@
   .ms-trip-purchase-row.is-refund .ms-trip-purchase-note{color:var(--teal);}
   @media(max-width:900px){.ms-trip-summary-layout{grid-template-columns:minmax(0,2fr) minmax(150px,1fr);gap:12px;}}
   @media(max-width:680px){.ms-trip-summary-layout{grid-template-columns:1fr;}.ms-trip-total-card{min-height:110px;}}
-  @media(max-width:520px){.ms-trip-visual-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}
-  @media(max-width:420px){.ms-trip-visual-grid{grid-template-columns:1fr;}}
+  @media(max-width:520px){.ms-trip-visual-grid{grid-template-columns:repeat(2,minmax(0,1fr));}.ms-trip-category-clickable.is-expanded{grid-column:span 2;}}
+  @media(max-width:420px){.ms-trip-visual-grid{grid-template-columns:1fr;}.ms-trip-category-clickable.is-expanded{grid-column:span 1;}}
   .ms-spin{
     display:inline-block;width:13px;height:13px;border-radius:50%;
     border:2px solid rgba(74,54,35,.2);border-top-color:#FFFCF5;
