@@ -2,67 +2,78 @@
 (function(){
 try{
 
-let CATS = ['продукти','продукти спільні','такси','транспорт','Путешествия транспорт: самолёт','Путешествия транспорт: кава в літаку','Путешествия транспорт: поезд',
-  'Путешествия транспорт: автобус','Путешествия транспорт: общественный транспорт','авто','бензин','обеды','дц','бьюти',
-  'лекарства','анализи','йожа','подарунки','розваги','розваги спільні','Internet','одежда','готівка (зняття)','послуги (ФОП)',
-  'перекази людям','квартплата','інше'];
+let CATS = ['продукти','продукти спільні','таксі','транспорт','Подорожі: літак','Подорожі: кава в літаку','Подорожі: потяг',
+  'Подорожі: автобус','Подорожі: громадський транспорт','авто','пальне','обіди','догляд','краса',
+  'ліки','аналізи','йога','подарунки','розваги','розваги спільні','інтернет','одяг','готівка (зняття)','послуги (ФОП)',
+  'перекази людям','комунальні послуги','інше'];
+const CATEGORY_RENAMES = {
+  'такси':'таксі',
+  'Путешествия транспорт: самолёт':'Подорожі: літак',
+  'Путешествия транспорт: кава в літаку':'Подорожі: кава в літаку',
+  'Путешествия транспорт: поезд':'Подорожі: потяг',
+  'Путешествия транспорт: автобус':'Подорожі: автобус',
+  'Путешествия транспорт: інше':'Подорожі: громадський транспорт',
+  'Путешествия транспорт: общественный транспорт':'Подорожі: громадський транспорт',
+  'бензин':'пальне','обеды':'обіди','дц':'догляд','бьюти':'краса','лекарства':'ліки',
+  'анализи':'аналізи','йожа':'йога','Internet':'інтернет','одежда':'одяг','квартплата':'комунальні послуги'
+};
 
 function sortedCats(){
   return [...CATS].sort((a,b)=>a.localeCompare(b,'uk'));
 }
 
 const COLORS = {
-  'продукти':'#C9A24B','продукти спільні':'#C4A24B','такси':'#4FA98C','транспорт':'#7FB7A3',
-  'Путешествия транспорт: самолёт':'#B7734F','Путешествия транспорт: кава в літаку':'#D9A374','Путешествия транспорт: поезд':'#D4956E',
-  'Путешествия транспорт: автобус':'#E3B084','Путешествия транспорт: общественный транспорт':'#8C6A4E',
-  'авто':'#8C6A5C','бензин':'#C15B4A','обеды':'#E0C468','дц':'#6E8FA8','бьюти':'#A87FA8',
-  'лекарства':'#7FA8A0','анализи':'#5C8C8C','йожа':'#8FA85C','подарунки':'#D48FAA',
+  'продукти':'#C9A24B','продукти спільні':'#C4A24B','таксі':'#4FA98C','транспорт':'#7FB7A3',
+  'Подорожі: літак':'#B7734F','Подорожі: кава в літаку':'#D9A374','Подорожі: потяг':'#D4956E',
+  'Подорожі: автобус':'#E3B084','Подорожі: громадський транспорт':'#8C6A4E',
+  'авто':'#8C6A5C','пальне':'#C15B4A','обіди':'#E0C468','догляд':'#6E8FA8','краса':'#A87FA8',
+  'ліки':'#7FA8A0','аналізи':'#5C8C8C','йога':'#8FA85C','подарунки':'#D48FAA',
   'розваги':'#B88AC4','розваги спільні':'#C4A0CE',
-  'Internet':'#5C7A8C','одежда':'#A8955C','готівка (зняття)':'#6B6459',
+  'інтернет':'#5C7A8C','одяг':'#A8955C','готівка (зняття)':'#6B6459',
   'послуги (ФОП)':'#8C7A5C','перекази людям':'#5C6B8C',
-  'квартплата':'#6E7F5C','інше':'#4A443A'
+  'комунальні послуги':'#6E7F5C','інше':'#4A443A'
 };
 
 const ICONS = {
-  'продукти':'🧺','продукти спільні':'🧺🤝','такси':'🚕','транспорт':'🚌',
-  'Путешествия транспорт: самолёт':'✈️','Путешествия транспорт: кава в літаку':'☕','Путешествия транспорт: поезд':'🚆',
-  'Путешествия транспорт: автобус':'🚌','Путешествия транспорт: общественный транспорт':'🚎',
-  'авто':'🚗','бензин':'⛽','обеды':'🍽️','дц':'🏬','бьюти':'💅',
-  'лекарства':'💊','анализи':'💉','йожа':'🧘','подарунки':'🎁',
+  'продукти':'🧺','продукти спільні':'🧺🤝','таксі':'🚕','транспорт':'🚌',
+  'Подорожі: літак':'✈️','Подорожі: кава в літаку':'☕','Подорожі: потяг':'🚆',
+  'Подорожі: автобус':'🚌','Подорожі: громадський транспорт':'🚎',
+  'авто':'🚗','пальне':'⛽','обіди':'🍽️','догляд':'🏬','краса':'💅',
+  'ліки':'💊','аналізи':'💉','йога':'🧘','подарунки':'🎁',
   'розваги':'🎉','розваги спільні':'🎉🤝',
-  'Internet':'📶','одежда':'👗','готівка (зняття)':'💵',
+  'інтернет':'📶','одяг':'👗','готівка (зняття)':'💵',
   'послуги (ФОП)':'🧾','перекази людям':'🤝',
-  'квартплата':'🏠','інше':'❓'
+  'комунальні послуги':'🏠','інше':'❓'
 };
 
 function defaultRules(){
   return [
     {kw:['фора','сільпо','атб','novus','lidl','carrefour','велмарт','megaimage','gatedo','mini mart','kollmarket','ovochi','лоток','moldretail','коло','маркетопт','ашан','екомаркет','stambo'],cat:'продукти'},
-    {kw:['bolt','uklon','uber'],cat:'такси'},
-    {kw:['wizz','ryanair','turkish air','lufthansa','kiwi.com','flyone','aelia'],cat:'Путешествия транспорт: самолёт'},
-    {kw:['укрзалізниця','залізни','cfr','societatea nationala'],cat:'Путешествия транспорт: поезд'},
-    {kw:['flixbus','bus station','автовокзал'],cat:'Путешествия транспорт: автобус'},
-    {kw:['omio','busfor'],cat:'Путешествия транспорт: общественный транспорт'},
-    {kw:['окко','wog','азс','avias','socar','glusco','azs'],cat:'бензин'},
-    {kw:['kaviarnia','dnata catering','zhniva','santandreea','imbarcadero','vypichka','the coffee','кав\'ярня','кафе'],cat:'обеды'},
-    {kw:['prostor','brocard','eva '],cat:'дц'},
-    {kw:['salon','medcity','салон крас'],cat:'бьюти'},
-    {kw:['аптека','apteka','аптечка'],cat:'лекарства'},
-    {kw:['діла','synevo','сінево','медична лаборатор'],cat:'анализи'},
-    {kw:['йога','yoga','sport life','спортлайф'],cat:'йожа'},
+    {kw:['bolt','uklon','uber'],cat:'таксі'},
+    {kw:['wizz','ryanair','turkish air','lufthansa','kiwi.com','flyone','aelia'],cat:'Подорожі: літак'},
+    {kw:['укрзалізниця','залізни','cfr','societatea nationala'],cat:'Подорожі: потяг'},
+    {kw:['flixbus','bus station','автовокзал'],cat:'Подорожі: автобус'},
+    {kw:['omio','busfor'],cat:'Подорожі: громадський транспорт'},
+    {kw:['окко','wog','азс','avias','socar','glusco','azs'],cat:'пальне'},
+    {kw:['kaviarnia','dnata catering','zhniva','santandreea','imbarcadero','vypichka','the coffee','кав\'ярня','кафе'],cat:'обіди'},
+    {kw:['prostor','brocard','eva '],cat:'догляд'},
+    {kw:['salon','medcity','салон крас'],cat:'краса'},
+    {kw:['аптека','apteka','аптечка'],cat:'ліки'},
+    {kw:['діла','synevo','сінево','медична лаборатор'],cat:'аналізи'},
+    {kw:['йога','yoga','sport life','спортлайф'],cat:'йога'},
     {kw:['rozetka','tezenis','media galaxy','wayforpay','нова пошта','mo sviato'],cat:'подарунки'},
-    {kw:['vodafone','kyivstar','київстар','lifecell','terms','google'],cat:'Internet'},
-    {kw:['humana'],cat:'одежда'},
+    {kw:['vodafone','kyivstar','київстар','lifecell','terms','google'],cat:'інтернет'},
+    {kw:['humana'],cat:'одяг'},
     {kw:['atm '],cat:'готівка (зняття)'},
     {kw:['фоп '],cat:'послуги (ФОП)'}
   ];
 }
 
 function mccFallback(mcc){
-  const m = {4111:'транспорт',4112:'Путешествия транспорт: поезд',4121:'такси',4131:'Путешествия транспорт: общественный транспорт',
-    4722:'Путешествия транспорт: самолёт',3000:'Путешествия транспорт: самолёт',5411:'продукти',5499:'продукти',
-    5541:'бензин',5814:'обеды',5812:'обеды',5977:'бьюти',5912:'лекарства',8071:'анализи',8099:'анализи',
-    7997:'йожа',5691:'одежда',6011:'готівка (зняття)',4900:'Internet',4814:'Internet',7299:'Путешествия транспорт: общественный транспорт'};
+  const m = {4111:'транспорт',4112:'Подорожі: потяг',4121:'таксі',4131:'Подорожі: громадський транспорт',
+    4722:'Подорожі: літак',3000:'Подорожі: літак',5411:'продукти',5499:'продукти',
+    5541:'пальне',5814:'обіди',5812:'обіди',5977:'краса',5912:'ліки',8071:'аналізи',8099:'аналізи',
+    7997:'йога',5691:'одяг',6011:'готівка (зняття)',4900:'інтернет',4814:'інтернет',7299:'Подорожі: громадський транспорт'};
   return m[mcc] || null;
 }
 
@@ -74,7 +85,7 @@ function categorize(desc, mcc, amount, overrides, rules){
   const d = desc.toLowerCase();
   if(overrides[desc]) return overrides[desc];
   // small Wizz Air / Ryanair charges (under 600) are onboard snacks/coffee/seat fees, not the ticket itself
-  if((d.includes('wizz') || d.includes('ryan')) && amount < 0 && Math.abs(amount) < 600) return 'Путешествия транспорт: кава в літаку';
+  if((d.includes('wizz') || d.includes('ryan')) && amount < 0 && Math.abs(amount) < 600) return 'Подорожі: кава в літаку';
   for(const r of rules){
     for(const kw of r.kw){ if(d.includes(kw)) return r.cat; }
   }
@@ -264,12 +275,12 @@ async function storageSet(key, value){
 
 async function loadPersisted(){
   const ov = await storageGet('ms_overrides'); if(ov) state.overrides = {...state.overrides, ...JSON.parse(ov)};
-  // migrate any leftover pre-split "авто/бензин" values (that category no longer exists) —
-  // Зелена картка is insurance, not fuel, so it goes to "авто"; everything else falls back to "бензин"
+  // Migrate any leftover combined auto/fuel values; Green Card is insurance, while
+  // the remaining merchants are fuel purchases.
   let migratedOverrides = false;
   Object.keys(state.overrides).forEach(k=>{
     if(state.overrides[k]==='авто/бензин'){
-      state.overrides[k] = k.includes('Зелена картка') ? 'авто' : 'бензин';
+      state.overrides[k] = k.includes('Зелена картка') ? 'авто' : 'пальне';
       migratedOverrides = true;
     }
   });
@@ -302,26 +313,24 @@ async function loadPersisted(){
     stored.forEach(c=>{ if(!state.customCats.find(x=>x.name===c.name)) applyCustomCategory(c, true); });
   }
 
-  const oldTransitCategory = 'Путешествия транспорт: інше';
-  const newTransitCategory = 'Путешествия транспорт: общественный транспорт';
   let migratedCategoryOverrides = false;
   Object.keys(state.overrides).forEach(desc=>{
-    if(state.overrides[desc]===oldTransitCategory){
-      state.overrides[desc] = newTransitCategory;
+    if(CATEGORY_RENAMES[state.overrides[desc]]){
+      state.overrides[desc] = CATEGORY_RENAMES[state.overrides[desc]];
       migratedCategoryOverrides = true;
     }
   });
   let migratedTransactionCategories = false;
   Object.keys(state.txCategoryOverride).forEach(key=>{
-    if(state.txCategoryOverride[key]===oldTransitCategory){
-      state.txCategoryOverride[key] = newTransitCategory;
+    if(CATEGORY_RENAMES[state.txCategoryOverride[key]]){
+      state.txCategoryOverride[key] = CATEGORY_RENAMES[state.txCategoryOverride[key]];
       migratedTransactionCategories = true;
     }
   });
   let migratedManualCategories = false;
   state.manual.forEach(entry=>{
-    if(entry.cat===oldTransitCategory){
-      entry.cat = newTransitCategory;
+    if(CATEGORY_RENAMES[entry.cat]){
+      entry.cat = CATEGORY_RENAMES[entry.cat];
       migratedManualCategories = true;
     }
   });
@@ -567,6 +576,15 @@ async function importDataFromFile(file){
   if(payload.customCats){
     payload.customCats.forEach(c=>{ if(!state.customCats.find(x=>x.name===c.name)) applyCustomCategory(c, true); });
   }
+  Object.keys(state.overrides).forEach(desc=>{
+    if(CATEGORY_RENAMES[state.overrides[desc]]) state.overrides[desc] = CATEGORY_RENAMES[state.overrides[desc]];
+  });
+  Object.keys(state.txCategoryOverride).forEach(key=>{
+    if(CATEGORY_RENAMES[state.txCategoryOverride[key]]) state.txCategoryOverride[key] = CATEGORY_RENAMES[state.txCategoryOverride[key]];
+  });
+  state.manual.forEach(entry=>{
+    if(CATEGORY_RENAMES[entry.cat]) entry.cat = CATEGORY_RENAMES[entry.cat];
+  });
   await persistOverrides(); await persistManual(); await persistDebts(); await persistNotes();
   await persistNotExpense(); await persistDayExcluded(); await persistAmountOverride(); await persistTxCategoryOverride();
   await persistTrips();
@@ -2477,11 +2495,11 @@ function buildTripsPanel(all){
 
         const categoryPriority = cat=>{
           const name = (cat||'').toLocaleLowerCase('uk');
-          if(/общественный транспорт|громадський транспорт/.test(name)) return 2;
-          if(/жиль|житл|hotel|hostel|airbnb|booking\.com|проживан|квартир/.test(name)) return 1;
-          if(/обед|кафе|ресторан/.test(name)) return 3;
+          if(/громадський транспорт/.test(name)) return 2;
+          if(/житло|готел|хостел|проживан|квартир/.test(name)) return 1;
+          if(/обід|кафе|ресторан/.test(name)) return 3;
           if(/продукт/.test(name)) return 4;
-          if(/транспорт|такси|самол|літак|авіа|поезд|поїзд|автобус|бензин|авто|bolt|uber|uklon/.test(name)) return 0;
+          if(/транспорт|таксі|літак|авіа|потяг|автобус|пальне|авто|bolt|uber|uklon/.test(name)) return 0;
           return 5;
         };
         const categoryEntries = Object.entries(byExactCat).sort((a,b)=>{

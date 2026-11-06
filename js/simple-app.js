@@ -7,24 +7,29 @@ try{
 // Класифікація йде тільки за кодом MCC, який дає сам Monobank — жодних
 // персональних keyword-правил, щоб кожен новий користувач починав з чистого
 // аркуша і вчив свої власні категорії поступово, а не отримував чужі звички.
-let CATS = ['продукти','кафе і ресторани','транспорт','авто і бензин','аптека і здоров\'я',
+let CATS = ['продукти','кафе та ресторани','транспорт','авто й пальне','аптека та здоров\'я',
   'одяг та покупки','розваги','комунальні послуги та зв\'язок','готівка (зняття)',
   'перекази людям','послуги','інше'];
+const CATEGORY_RENAMES = {
+  'авто і бензин':'авто й пальне',
+  'кафе і ресторани':'кафе та ресторани',
+  'аптека і здоров\'я':'аптека та здоров\'я'
+};
 
 function sortedCats(){
   return [...CATS].sort((a,b)=>a.localeCompare(b,'uk'));
 }
 
 const COLORS = {
-  'продукти':'#C9A24B','кафе і ресторани':'#E0C468','транспорт':'#7FB7A3','авто і бензин':'#C15B4A',
-  'аптека і здоров\'я':'#7FA8A0','одяг та покупки':'#A8955C','розваги':'#B88AC4',
+  'продукти':'#C9A24B','кафе та ресторани':'#E0C468','транспорт':'#7FB7A3','авто й пальне':'#C15B4A',
+  'аптека та здоров\'я':'#7FA8A0','одяг та покупки':'#A8955C','розваги':'#B88AC4',
   'комунальні послуги та зв\'язок':'#5C7A8C','готівка (зняття)':'#6B6459',
   'перекази людям':'#5C6B8C','послуги':'#8C7A5C','інше':'#4A443A'
 };
 
 const ICONS = {
-  'продукти':'🧺','кафе і ресторани':'🍽️','транспорт':'🚌','авто і бензин':'⛽',
-  'аптека і здоров\'я':'💊','одяг та покупки':'👗','розваги':'🎉',
+  'продукти':'🧺','кафе та ресторани':'🍽️','транспорт':'🚌','авто й пальне':'⛽',
+  'аптека та здоров\'я':'💊','одяг та покупки':'👗','розваги':'🎉',
   'комунальні послуги та зв\'язок':'📶','готівка (зняття)':'💵',
   'перекази людям':'🤝','послуги':'🧾','інше':'❓'
 };
@@ -35,10 +40,10 @@ function defaultRules(){
 
 function mccFallback(mcc){
   const m = {
-    5411:'продукти',5499:'продукти',5814:'кафе і ресторани',5812:'кафе і ресторани',
+    5411:'продукти',5499:'продукти',5814:'кафе та ресторани',5812:'кафе та ресторани',
     4111:'транспорт',4121:'транспорт',4131:'транспорт',4112:'транспорт',
-    5541:'авто і бензин',5542:'авто і бензин',
-    5912:'аптека і здоров\'я',8071:'аптека і здоров\'я',8099:'аптека і здоров\'я',
+    5541:'авто й пальне',5542:'авто й пальне',
+    5912:'аптека та здоров\'я',8071:'аптека та здоров\'я',8099:'аптека та здоров\'я',
     5691:'одяг та покупки',5651:'одяг та покупки',5732:'одяг та покупки',
     7997:'розваги',7832:'розваги',5813:'розваги',
     4900:'комунальні послуги та зв\'язок',4814:'комунальні послуги та зв\'язок',
@@ -261,12 +266,12 @@ async function storageSet(key, value){
 
 async function loadPersisted(){
   const ov = await storageGet('ms_overrides'); if(ov) state.overrides = {...state.overrides, ...JSON.parse(ov)};
-  // migrate any leftover pre-split "авто/бензин" values (that category no longer exists) —
-  // Зелена картка is insurance, not fuel, so it goes to "авто"; everything else falls back to "бензин"
+  // Migrate any leftover combined auto/fuel values; Green Card is insurance, while
+  // the remaining merchants are fuel purchases.
   let migratedOverrides = false;
   Object.keys(state.overrides).forEach(k=>{
     if(state.overrides[k]==='авто/бензин'){
-      state.overrides[k] = k.includes('Зелена картка') ? 'авто' : 'бензин';
+      state.overrides[k] = k.includes('Зелена картка') ? 'авто' : 'авто й пальне';
       migratedOverrides = true;
     }
   });
@@ -295,6 +300,28 @@ async function loadPersisted(){
     const stored = JSON.parse(cc);
     stored.forEach(c=>{ if(!state.customCats.find(x=>x.name===c.name)) applyCustomCategory(c, true); });
   }
+  let migratedTranslatedOverrides = false, migratedTxCategories = false, migratedManual = false;
+  Object.keys(state.overrides).forEach(desc=>{
+    if(CATEGORY_RENAMES[state.overrides[desc]]){
+      state.overrides[desc] = CATEGORY_RENAMES[state.overrides[desc]];
+      migratedTranslatedOverrides = true;
+    }
+  });
+  Object.keys(state.txCategoryOverride).forEach(key=>{
+    if(CATEGORY_RENAMES[state.txCategoryOverride[key]]){
+      state.txCategoryOverride[key] = CATEGORY_RENAMES[state.txCategoryOverride[key]];
+      migratedTxCategories = true;
+    }
+  });
+  state.manual.forEach(entry=>{
+    if(CATEGORY_RENAMES[entry.cat]){
+      entry.cat = CATEGORY_RENAMES[entry.cat];
+      migratedManual = true;
+    }
+  });
+  if(migratedTranslatedOverrides) await persistOverrides();
+  if(migratedTxCategories) await persistTxCategoryOverride();
+  if(migratedManual) await persistManual();
 }
 
 async function persistOverrides(){ await storageSet('ms_overrides', JSON.stringify(state.overrides)); }
@@ -514,6 +541,15 @@ async function importDataFromFile(file){
   if(payload.customCats){
     payload.customCats.forEach(c=>{ if(!state.customCats.find(x=>x.name===c.name)) applyCustomCategory(c, true); });
   }
+  Object.keys(state.overrides).forEach(desc=>{
+    if(CATEGORY_RENAMES[state.overrides[desc]]) state.overrides[desc] = CATEGORY_RENAMES[state.overrides[desc]];
+  });
+  Object.keys(state.txCategoryOverride).forEach(key=>{
+    if(CATEGORY_RENAMES[state.txCategoryOverride[key]]) state.txCategoryOverride[key] = CATEGORY_RENAMES[state.txCategoryOverride[key]];
+  });
+  state.manual.forEach(entry=>{
+    if(CATEGORY_RENAMES[entry.cat]) entry.cat = CATEGORY_RENAMES[entry.cat];
+  });
   await persistOverrides(); await persistManual(); await persistDebts(); await persistNotes();
   await persistNotExpense(); await persistDayExcluded(); await persistAmountOverride(); await persistTxCategoryOverride();
   await persistTrips();
