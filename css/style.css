@@ -196,6 +196,15 @@
 
   .ms-table-wrap{overflow-x:auto;}
   table.ms-tx{width:100%;border-collapse:collapse;font-size:12px;}
+  table.ms-tx-main{table-layout:fixed;min-width:850px;}
+  .ms-tx-main th:nth-child(1),.ms-tx-main td:nth-child(1){width:11%;}
+  .ms-tx-main th:nth-child(2),.ms-tx-main td:nth-child(2){width:34%;}
+  .ms-tx-main th:nth-child(3),.ms-tx-main td:nth-child(3){width:16%;}
+  .ms-tx-main th:nth-child(4),.ms-tx-main td:nth-child(4){width:16%;}
+  .ms-tx-main th:nth-child(5),.ms-tx-main td:nth-child(5){width:7%;text-align:center;}
+  .ms-tx-main th:nth-child(6),.ms-tx-main td:nth-child(6){width:16%;}
+  .ms-tx-main .ms-cat-select{display:block;width:100%;max-width:none;min-width:0;}
+  .ms-tx-main .ms-desc-line>span{min-width:0;overflow-wrap:anywhere;}
   table.ms-tx tr.ms-day-border td{border-top:2px solid var(--gold);}
   table.ms-tx th{
     text-align:left;color:var(--muted);font-weight:500;

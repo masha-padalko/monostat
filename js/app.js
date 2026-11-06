@@ -147,6 +147,7 @@ let state = {
   jarDraftStartDate: null, // transient — whatever she's currently picked in the date field, before clicking (Re)start
   jarStartDateActual: null, // when THIS tracking run actually began — fixed, unlike jarLastDate which advances to today once caught up
   jarAutoCheckedThisLoad: false, // ensures the background jar catch-up only runs once per page load, never re-fires mid-interaction
+  dailyBudgetEndDate: null, // selected date through which to spread the current card balance
   editingTripDates: null, // tripId whose inline date-picker form is currently open, or null
   authChecking: true, // true only during the very first initAuth() check — avoids flashing the login form before we know a session already exists
   useCache: true, // whether to merge cached historical periods in alongside the freshly fetched range
@@ -292,6 +293,7 @@ async function loadPersisted(){
   const je = await storageGet('ms_jarenabled'); if(je!==null) state.jarEnabled = je==='true';
   const jdb = await storageGet('ms_jardailybudget'); if(jdb) state.jarDailyBudget = JSON.parse(jdb);
   const jsd = await storageGet('ms_jarstartdateactual'); if(jsd) state.jarStartDateActual = jsd;
+  const dbed = await storageGet('ms_dailybudgetenddate'); if(dbed) state.dailyBudgetEndDate = dbed;
   const tr = await storageGet('ms_trips'); if(tr) state.trips = JSON.parse(tr);
   const to_ = await storageGet('ms_tripof'); if(to_) state.tripOf = JSON.parse(to_);
   const cc = await storageGet('ms_customcats');
@@ -676,6 +678,14 @@ function daysUntilPeriodEnd(fromDateStr){
   // +1 because both endpoints count as full days (today AND the 10th itself),
   // not just the number of nights between them
   return Math.max(1, Math.round((boundary.getTime()-now.getTime())/(24*60*60*1000)) + 1);
+}
+
+function daysUntilDateInclusive(endDateStr){
+  const start = todayStr().split('-').map(Number);
+  const end = (endDateStr||todayStr()).split('-').map(Number);
+  const startUtc = Date.UTC(start[0], start[1]-1, start[2]);
+  const endUtc = Date.UTC(end[0], end[1]-1, end[2]);
+  return Math.max(1, Math.floor((endUtc-startUtc)/86400000)+1);
 }
 
 // Monobank gives a `balance` field on every transaction — the balance AFTER that
@@ -1295,35 +1305,6 @@ function resultsPanel(){
     });
     legend.appendChild(row);
 
-    if(cat==='продукти'){
-      const storeTotals = new Map();
-      const addStoreAmount = (desc, amount) => {
-        const name = (desc || '(без опису)').trim().replace(/\s+/g, ' ');
-        const key = name.toLocaleLowerCase('uk');
-        const existing = storeTotals.get(key);
-        if(existing) existing.amount += amount;
-        else storeTotals.set(key, {name, amount});
-      };
-      (byCatTx[cat]||[]).forEach(t=>addStoreAmount(t.desc, Math.abs(t.amount)));
-      (refundsByCat[cat]||[]).forEach(r=>addStoreAmount(r.desc, -r.amount));
-      const stores = [...storeTotals.values()].sort((a,b)=>b.amount-a.amount);
-      if(stores.length){
-        const storeDetail = document.createElement('div');
-        storeDetail.className = 'ms-legend-detail ms-store-breakdown';
-        const heading = document.createElement('div');
-        heading.className = 'ms-store-breakdown-title';
-        heading.textContent = 'Витрати по магазинах';
-        storeDetail.appendChild(heading);
-        stores.forEach(store=>{
-          const storeRow = document.createElement('div');
-          storeRow.className = 'ms-store-breakdown-row';
-          storeRow.innerHTML = `<span>${escapeHtml(store.name)}</span><span>${store.amount<0?'−':''}${fmt(store.amount)} ${curSym()}</span>`;
-          storeDetail.appendChild(storeRow);
-        });
-        legend.appendChild(storeDetail);
-      }
-    }
-
     if(expanded){
       const detail = document.createElement('div');
       detail.className = 'ms-legend-detail';
@@ -1370,7 +1351,7 @@ function resultsPanel(){
       <input type="text" id="txSearchInput" placeholder="Пошук за описом або власною нотаткою…" value="${escapeHtml(state.txSearchQuery||'')}">
     </div>
     <div style="font-size:13px;color:var(--muted);margin-bottom:12px" id="txSearchSummary">Разом витрачено: <b style="color:var(--gold);font-family:var(--font-mono)">${fmt(total)} ${curSym()}</b>${fmtEur(total, curCode())} · ${all.length} операцій</div>
-    <div class="ms-table-wrap"><table class="ms-tx"><thead><tr><th>Дата</th><th>Опис</th><th>Категорія</th><th>Поїздка</th><th title="Не витрата">Чисто</th><th style="text-align:right">Сума</th></tr></thead><tbody id="txBody"></tbody></table></div>`;
+    <div class="ms-table-wrap"><table class="ms-tx ms-tx-main"><thead><tr><th>Дата</th><th>Опис</th><th>Категорія</th><th>Поїздка</th><th title="Не витрата">Чисто</th><th style="text-align:right">Сума</th></tr></thead><tbody id="txBody"></tbody></table></div>`;
   const tbody = panel2.querySelector('#txBody');
   let prevDayKey = null;
   all.sort((a,b)=>b.date-a.date).forEach(t=>{
@@ -1455,8 +1436,6 @@ function resultsPanel(){
     }
 
     const catCell = tr.children[2];
-    catCell.style.display = 'flex';
-    catCell.style.alignItems = 'center';
     catCell.appendChild(sel);
 
     const tripCell = tr.children[3];
@@ -1970,8 +1949,14 @@ function buildDailyBudgetPanel(all){
   const acc = state.accounts.find(a=>a.id===state.selectedAccount);
   if(!acc){ p.innerHTML = ''; return p; }
 
-  const days = daysUntilPeriodEnd(); // today to the 10th, inclusive
+  const today = todayStr();
+  const defaultEndDate = todayStr(nextPeriodBoundary());
+  const endDate = state.dailyBudgetEndDate && state.dailyBudgetEndDate >= today
+    ? state.dailyBudgetEndDate
+    : defaultEndDate;
+  const days = daysUntilDateInclusive(endDate);
   const dailyBudget = (acc.balance/100) / days;
+  const endDateLabel = new Date(endDate+'T00:00:00').toLocaleDateString('uk-UA',{day:'numeric',month:'long',year:'numeric'});
 
   p.innerHTML = `
     <h2>Скільки можна витрачати на день</h2>
@@ -1981,7 +1966,11 @@ function buildDailyBudgetPanel(all){
     </label>
     ${state.jarEnabled ? `
     <div style="margin-top:14px">
-      <div class="ms-hint" style="margin:0">Баланс ${fmt(acc.balance/100)} ${curSym()} ÷ ${days} дн. (до 10 числа, включно)</div>
+      <div class="ms-field" style="max-width:260px;margin-bottom:12px">
+        <label for="dailyBudgetEndDate">Розрахувати до дати</label>
+        <input type="date" id="dailyBudgetEndDate" min="${today}" value="${endDate}">
+      </div>
+      <div class="ms-hint" style="margin:0">Баланс ${fmt(acc.balance/100)} ${curSym()} ÷ ${days} дн. (до ${endDateLabel}, включно)</div>
       <div class="ms-today-amt" style="font-size:24px;color:var(--gold)">${fmt(dailyBudget)} ${curSym()}</div>
       <div class="ms-hint" style="margin:0;opacity:.8">${fmtEur(dailyBudget, curCode()).trim()}</div>
     </div>
@@ -1990,6 +1979,14 @@ function buildDailyBudgetPanel(all){
   p.querySelector('#jarEnabledChk').addEventListener('change', async e=>{
     state.jarEnabled = e.target.checked;
     await storageSet('ms_jarenabled', String(state.jarEnabled));
+    render();
+  });
+  const endDateInput = p.querySelector('#dailyBudgetEndDate');
+  if(endDateInput) endDateInput.addEventListener('change', async e=>{
+    const selectedDate = e.target.value;
+    if(!selectedDate || selectedDate < todayStr()) return;
+    state.dailyBudgetEndDate = selectedDate;
+    await storageSet('ms_dailybudgetenddate', selectedDate);
     render();
   });
   return p;
