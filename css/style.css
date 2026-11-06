@@ -378,6 +378,7 @@
   .ms-trip-total-card{display:flex;flex-direction:column;justify-content:center;align-items:center;gap:8px;min-width:0;padding:12px;border:0;border-radius:0;background:transparent;text-align:center;}
   .ms-trip-total-label{font-size:12px;color:var(--muted);}
   .ms-trip-total-amount{font-family:var(--font-mono);font-size:clamp(20px,2.2vw,30px);line-height:1.15;color:var(--gold);overflow-wrap:anywhere;}
+  .ms-trip-total-eur{font-size:11px;line-height:1.4;color:var(--muted);}
   .ms-trip-purchases{border-top:1px solid var(--line);padding-top:12px;}
   .ms-trip-purchases h3{margin:0 0 8px;font-family:var(--font-display);font-size:15px;font-weight:500;}
   .ms-trip-purchase-row{padding:9px 2px;border-bottom:1px solid var(--line);}

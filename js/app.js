@@ -685,6 +685,76 @@ function curCode(){
   const acc = state.accounts.find(a=>a.id===state.selectedAccount);
   return acc ? acc.currency : 980;
 }
+const MONO_RATES_CACHE_KEY = 'monostat_public_currency_rates';
+const MONO_RATES_CACHE_MS = 60*1000;
+let monoCurrencyRates = null;
+let monoCurrencyRatesFetchedAt = 0;
+let monoCurrencyRatesRequest = null;
+
+async function loadMonobankCurrencyRates(){
+  if(monoCurrencyRates && Date.now()-monoCurrencyRatesFetchedAt < MONO_RATES_CACHE_MS) return monoCurrencyRates;
+  if(monoCurrencyRatesRequest) return monoCurrencyRatesRequest;
+
+  monoCurrencyRatesRequest = (async()=>{
+    let cached = null;
+    try{
+      cached = JSON.parse(localStorage.getItem(MONO_RATES_CACHE_KEY)||'null');
+      if(cached && Array.isArray(cached.items)){
+        monoCurrencyRates = cached.items;
+        monoCurrencyRatesFetchedAt = cached.fetchedAt||0;
+        if(Date.now()-monoCurrencyRatesFetchedAt < MONO_RATES_CACHE_MS) return monoCurrencyRates;
+      }
+    }catch(e){ /* ignore unavailable or invalid local cache */ }
+
+    try{
+      const response = await fetch('https://api.monobank.ua/bank/currency', {cache:'no-store'});
+      if(!response.ok) throw new Error(`Monobank returned HTTP ${response.status}`);
+      const items = await response.json();
+      if(!Array.isArray(items) || !items.length) throw new Error('Empty Monobank currency rates');
+      monoCurrencyRates = items;
+      monoCurrencyRatesFetchedAt = Date.now();
+      try{ localStorage.setItem(MONO_RATES_CACHE_KEY, JSON.stringify({items, fetchedAt:monoCurrencyRatesFetchedAt})); }catch(e){ /* memory cache still works */ }
+      return items;
+    }catch(error){
+      console.warn('Could not load Monobank currency rates:', error);
+      return cached && Array.isArray(cached.items) ? cached.items : monoCurrencyRates;
+    }
+  })();
+
+  try{return await monoCurrencyRatesRequest;}
+  finally{monoCurrencyRatesRequest = null;}
+}
+
+function currencyRateBetween(items, fromCode, toCode){
+  const from = Number(fromCode), to = Number(toCode);
+  if(from===to) return 1;
+  const graph = new Map();
+  (items||[]).forEach(item=>{
+    const a = Number(item.currencyCodeA), b = Number(item.currencyCodeB);
+    const buy = Number(item.rateBuy), sell = Number(item.rateSell), cross = Number(item.rateCross);
+    const rate = Number.isFinite(buy)&&buy>0&&Number.isFinite(sell)&&sell>0 ? (buy+sell)/2
+      : (Number.isFinite(cross)&&cross>0 ? cross : null);
+    if(!rate) return;
+    if(!graph.has(a)) graph.set(a, []);
+    if(!graph.has(b)) graph.set(b, []);
+    graph.get(a).push([b,rate]);
+    graph.get(b).push([a,1/rate]);
+  });
+  const queue = [[from,1]], visited = new Set([from]);
+  while(queue.length){
+    const [code,rate] = queue.shift();
+    if(code===to) return rate;
+    (graph.get(code)||[]).forEach(([next,nextRate])=>{
+      if(!visited.has(next)){ visited.add(next); queue.push([next,rate*nextRate]); }
+    });
+  }
+  return null;
+}
+
+async function monobankEurRate(currencyCode){
+  const rates = await loadMonobankCurrencyRates();
+  return currencyRateBetween(rates, currencyCode||980, 978);
+}
 function todayStr(d){
   const dt = d || new Date();
   // local date components, not toISOString() (which converts to UTC and quietly
@@ -2526,6 +2596,20 @@ function buildTripsPanel(all){
           <span class="ms-trip-total-label">Разом за подорож</span>
           <strong class="ms-trip-total-amount">${fmt(sum)} ${curSym()}</strong>
         `;
+        const totalEurEstimate = document.createElement('span');
+        totalEurEstimate.className = 'ms-trip-total-eur';
+        totalEurEstimate.textContent = 'Курс Monobank…';
+        totalCard.appendChild(totalEurEstimate);
+        const tripCurrency = curCode();
+        monobankEurRate(tripCurrency).then(rate=>{
+          const eurAmount = rate ? Math.abs(sum)*rate : toEur(sum, tripCurrency);
+          if(eurAmount===null){
+            totalEurEstimate.textContent = '';
+            return;
+          }
+          const formattedEur = eurAmount.toLocaleString('uk-UA',{minimumFractionDigits:2,maximumFractionDigits:2});
+          totalEurEstimate.textContent = rate ? `≈ € ${formattedEur} · курс Monobank` : `≈ € ${formattedEur} · орієнтовно`;
+        });
         const summaryLayout = document.createElement('div');
         summaryLayout.className = 'ms-trip-summary-layout';
         summaryLayout.appendChild(categoryGrid);
