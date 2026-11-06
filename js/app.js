@@ -2520,7 +2520,17 @@ function buildTripsPanel(all){
           `;
           categoryGrid.appendChild(categoryCard);
         });
-        detailWrap.appendChild(categoryGrid);
+        const totalCard = document.createElement('div');
+        totalCard.className = 'ms-trip-total-card';
+        totalCard.innerHTML = `
+          <span class="ms-trip-total-label">Разом за подорож</span>
+          <strong class="ms-trip-total-amount">${fmt(sum)} ${curSym()}</strong>
+        `;
+        const summaryLayout = document.createElement('div');
+        summaryLayout.className = 'ms-trip-summary-layout';
+        summaryLayout.appendChild(categoryGrid);
+        summaryLayout.appendChild(totalCard);
+        detailWrap.appendChild(summaryLayout);
 
         const purchasesSection = document.createElement('div');
         purchasesSection.className = 'ms-trip-purchases';
