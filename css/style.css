@@ -375,6 +375,9 @@
   .ms-trip-category-name{font-size:12px;color:var(--muted);overflow-wrap:anywhere;}
   .ms-trip-category-amount{font-family:var(--font-mono);font-size:17px;color:var(--text);}
   .ms-trip-category-track{display:block;height:5px;width:100%;margin-top:4px;border-radius:99px;background:var(--trip-category-color);}
+  .ms-trip-category-note{font-size:10px;line-height:1.4;color:var(--muted);white-space:pre-wrap;overflow-wrap:anywhere;}
+  .ms-trip-category-note-button{border:0;padding:2px 0;background:none;color:var(--gold);font:inherit;font-size:10px;cursor:pointer;text-align:left;}
+  .ms-trip-category-note-button:hover{text-decoration:underline;}
   .ms-trip-total-card{display:flex;flex-direction:column;justify-content:center;align-items:center;gap:8px;min-width:0;padding:12px;border:0;border-radius:0;background:transparent;text-align:center;}
   .ms-trip-cover-image{display:block;width:100%;max-height:180px;aspect-ratio:4/3;object-fit:cover;border-radius:10px;margin-bottom:4px;}
   .ms-trip-total-label{font-size:12px;color:var(--muted);}

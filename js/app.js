@@ -418,6 +418,18 @@ async function setTripDates(tripId, dateFrom, dateTo){
   render();
   await persistTrips();
 }
+async function setTripCategoryNote(tripId, category){
+  const trip = state.trips.find(t=>t.id===tripId);
+  if(!trip) return;
+  const current = trip.categoryNotes?.[category] || '';
+  const value = prompt(`Коментар до категорії «${category}» у поїздці «${trip.name}»:`, current);
+  if(value===null) return;
+  trip.categoryNotes = trip.categoryNotes || {};
+  if(value.trim()) trip.categoryNotes[category] = value.trim();
+  else delete trip.categoryNotes[category];
+  render();
+  await persistTrips();
+}
 // Trip of a transaction: an explicit choice wins ('none' = manually removed from any trip);
 // otherwise it falls into the trip whose dates cover its (local) day. Narrowest range wins on overlap.
 function tripIdFor(t){
@@ -2577,6 +2589,19 @@ function buildTripsPanel(all){
             <strong class="ms-trip-category-amount">${amount<0?'−':''}${fmt(amount)} ${curSym()}</strong>
             <span class="ms-trip-category-track" aria-hidden="true"></span>
           `;
+          const categoryNote = (trip.categoryNotes?.[cat] || '').trim();
+          if(categoryNote){
+            const note = document.createElement('span');
+            note.className = 'ms-trip-category-note';
+            note.textContent = `💬 ${categoryNote}`;
+            categoryCard.appendChild(note);
+          }
+          const noteButton = document.createElement('button');
+          noteButton.type = 'button';
+          noteButton.className = 'ms-trip-category-note-button';
+          noteButton.textContent = categoryNote ? 'Змінити коментар' : '+ Коментар';
+          noteButton.addEventListener('click', ()=>setTripCategoryNote(trip.id, cat));
+          categoryCard.appendChild(noteButton);
           categoryGrid.appendChild(categoryCard);
         });
         const totalCard = document.createElement('div');
