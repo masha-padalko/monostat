@@ -3,7 +3,7 @@
 try{
 
 let CATS = ['продукти','продукти спільні','такси','транспорт','Путешествия транспорт: самолёт','Путешествия транспорт: кава в літаку','Путешествия транспорт: поезд',
-  'Путешествия транспорт: автобус','Путешествия транспорт: інше','авто','бензин','обеды','дц','бьюти',
+  'Путешествия транспорт: автобус','Путешествия транспорт: общественный транспорт','авто','бензин','обеды','дц','бьюти',
   'лекарства','анализи','йожа','подарунки','розваги','розваги спільні','Internet','одежда','готівка (зняття)','послуги (ФОП)',
   'перекази людям','квартплата','інше'];
 
@@ -14,7 +14,7 @@ function sortedCats(){
 const COLORS = {
   'продукти':'#C9A24B','продукти спільні':'#C4A24B','такси':'#4FA98C','транспорт':'#7FB7A3',
   'Путешествия транспорт: самолёт':'#B7734F','Путешествия транспорт: кава в літаку':'#D9A374','Путешествия транспорт: поезд':'#D4956E',
-  'Путешествия транспорт: автобус':'#E3B084','Путешествия транспорт: інше':'#8C6A4E',
+  'Путешествия транспорт: автобус':'#E3B084','Путешествия транспорт: общественный транспорт':'#8C6A4E',
   'авто':'#8C6A5C','бензин':'#C15B4A','обеды':'#E0C468','дц':'#6E8FA8','бьюти':'#A87FA8',
   'лекарства':'#7FA8A0','анализи':'#5C8C8C','йожа':'#8FA85C','подарунки':'#D48FAA',
   'розваги':'#B88AC4','розваги спільні':'#C4A0CE',
@@ -26,7 +26,7 @@ const COLORS = {
 const ICONS = {
   'продукти':'🧺','продукти спільні':'🧺🤝','такси':'🚕','транспорт':'🚌',
   'Путешествия транспорт: самолёт':'✈️','Путешествия транспорт: кава в літаку':'☕','Путешествия транспорт: поезд':'🚆',
-  'Путешествия транспорт: автобус':'🚌','Путешествия транспорт: інше':'🧳',
+  'Путешествия транспорт: автобус':'🚌','Путешествия транспорт: общественный транспорт':'🚎',
   'авто':'🚗','бензин':'⛽','обеды':'🍽️','дц':'🏬','бьюти':'💅',
   'лекарства':'💊','анализи':'💉','йожа':'🧘','подарунки':'🎁',
   'розваги':'🎉','розваги спільні':'🎉🤝',
@@ -42,7 +42,7 @@ function defaultRules(){
     {kw:['wizz','ryanair','turkish air','lufthansa','kiwi.com','flyone','aelia'],cat:'Путешествия транспорт: самолёт'},
     {kw:['укрзалізниця','залізни','cfr','societatea nationala'],cat:'Путешествия транспорт: поезд'},
     {kw:['flixbus','bus station','автовокзал'],cat:'Путешествия транспорт: автобус'},
-    {kw:['omio','busfor'],cat:'Путешествия транспорт: інше'},
+    {kw:['omio','busfor'],cat:'Путешествия транспорт: общественный транспорт'},
     {kw:['окко','wog','азс','avias','socar','glusco','azs'],cat:'бензин'},
     {kw:['kaviarnia','dnata catering','zhniva','santandreea','imbarcadero','vypichka','the coffee','кав\'ярня','кафе'],cat:'обеды'},
     {kw:['prostor','brocard','eva '],cat:'дц'},
@@ -59,10 +59,10 @@ function defaultRules(){
 }
 
 function mccFallback(mcc){
-  const m = {4111:'транспорт',4112:'Путешествия транспорт: поезд',4121:'такси',4131:'Путешествия транспорт: інше',
+  const m = {4111:'транспорт',4112:'Путешествия транспорт: поезд',4121:'такси',4131:'Путешествия транспорт: общественный транспорт',
     4722:'Путешествия транспорт: самолёт',3000:'Путешествия транспорт: самолёт',5411:'продукти',5499:'продукти',
     5541:'бензин',5814:'обеды',5812:'обеды',5977:'бьюти',5912:'лекарства',8071:'анализи',8099:'анализи',
-    7997:'йожа',5691:'одежда',6011:'готівка (зняття)',4900:'Internet',4814:'Internet',7299:'Путешествия транспорт: інше'};
+    7997:'йожа',5691:'одежда',6011:'готівка (зняття)',4900:'Internet',4814:'Internet',7299:'Путешествия транспорт: общественный транспорт'};
   return m[mcc] || null;
 }
 
@@ -301,6 +301,33 @@ async function loadPersisted(){
     const stored = JSON.parse(cc);
     stored.forEach(c=>{ if(!state.customCats.find(x=>x.name===c.name)) applyCustomCategory(c, true); });
   }
+
+  const oldTransitCategory = 'Путешествия транспорт: інше';
+  const newTransitCategory = 'Путешествия транспорт: общественный транспорт';
+  let migratedCategoryOverrides = false;
+  Object.keys(state.overrides).forEach(desc=>{
+    if(state.overrides[desc]===oldTransitCategory){
+      state.overrides[desc] = newTransitCategory;
+      migratedCategoryOverrides = true;
+    }
+  });
+  let migratedTransactionCategories = false;
+  Object.keys(state.txCategoryOverride).forEach(key=>{
+    if(state.txCategoryOverride[key]===oldTransitCategory){
+      state.txCategoryOverride[key] = newTransitCategory;
+      migratedTransactionCategories = true;
+    }
+  });
+  let migratedManualCategories = false;
+  state.manual.forEach(entry=>{
+    if(entry.cat===oldTransitCategory){
+      entry.cat = newTransitCategory;
+      migratedManualCategories = true;
+    }
+  });
+  if(migratedCategoryOverrides) await persistOverrides();
+  if(migratedTransactionCategories) await persistTxCategoryOverride();
+  if(migratedManualCategories) await persistManual();
 }
 
 async function persistOverrides(){ await storageSet('ms_overrides', JSON.stringify(state.overrides)); }
