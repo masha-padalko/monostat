@@ -108,7 +108,13 @@ function categoryFor(t){
 // should apply only to this one purchase or to every purchase from that merchant — because
 // by default a category change is merchant-wide, which surprised her when one supermarket
 // trip she wanted as "розваги" quietly recategorized every other supermarket run too.
-function handleCategoryChange(t, newCat){
+async function handleCategoryChange(t, newCat){
+  if(t.manual && Number.isInteger(t.manualIndex) && state.manual[t.manualIndex]){
+    state.manual[t.manualIndex].cat = newCat;
+    render();
+    await persistManual();
+    return;
+  }
   const onlyThis = confirm(`Застосувати «${newCat}» тільки до цієї покупки (${t.desc}, ${fmt(Math.abs(t.amount))} ${curSym()})?\n\nOK — тільки ця операція.\nСкасувати — до всіх покупок у «${t.desc}» (як завжди).`);
   if(onlyThis) setTxCategoryOverride(txKey(t), newCat);
   else setOverride(t.desc, newCat);
@@ -1302,7 +1308,7 @@ function resultsPanel(){
     const periodEnd = new Date(state.to+'T23:59:59').getTime();
     return d>=periodStart && d<=periodEnd;
   });
-  const all = expenses.concat(manualExpenses.map(m=>({date:new Date(m.date),desc:m.desc,amount:m.amount,cat:m.cat,manual:true})));
+  const all = expenses.concat(manualExpenses.map(m=>({date:new Date(m.date),desc:m.desc,amount:m.amount,cat:m.cat,manual:true,manualIndex:state.manual.indexOf(m)})));
 
   const byCat = {};
   all.forEach(t=>{ byCat[t.cat] = (byCat[t.cat]||0) + t.amount; });
