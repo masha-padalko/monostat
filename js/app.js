@@ -1561,6 +1561,7 @@ function resultsPanel(){
   const panelTransfer = buildDataTransferPanel();
   const panelCustomCat = buildCustomCategoryPanel();
   const panelTrips = buildTripsPanel(getAllHistoricalExpenses());
+  const panelRecurring = buildRecurringPaymentsPanel();
   const panelRange = rangePanel();
   if(state.jarEnabled && !state.jarAutoCheckedThisLoad && (state.jarPeriodStart !== defaultPeriodStart() || !state.jarLastDate || state.jarLastDate < todayStr())){
     state.jarAutoCheckedThisLoad = true;
@@ -1587,7 +1588,11 @@ function resultsPanel(){
   topRow.className = 'ms-grid';
   topRow.style.marginBottom = '14px';
   topRow.appendChild(panel1);
-  topRow.appendChild(panelToday);
+  const todayStack = document.createElement('div');
+  todayStack.className = 'ms-dashboard-stack';
+  todayStack.appendChild(panelToday);
+  if(!panelRecurring.hidden) todayStack.appendChild(panelRecurring);
+  topRow.appendChild(todayStack);
   wrap.appendChild(topRow);
 
   // two-column row: all transactions (2/3) / incoming (1/3) — each can expand downward in place
@@ -1609,11 +1614,6 @@ function resultsPanel(){
   // manual cash entry — moved down, its own full-width row near the bottom
   panel3.style.marginBottom = '14px';
   wrap.appendChild(panel3);
-
-  // recurring payments — Orange/Vodafone/Claude etc, own full-width row
-  const panelRecurring = buildRecurringPaymentsPanel();
-  panelRecurring.style.marginBottom = '14px';
-  wrap.appendChild(panelRecurring);
 
   // monthly comparison bar chart — full history, own full-width row
   const panelMonthly = buildMonthlyBarChart();
@@ -1698,7 +1698,7 @@ function buildRecurringPaymentsPanel(){
     rows.push({ label:`Apple (${fmt(Math.abs(last.amount))} ₴${origNote})`, icon:'🍎', lastAmt:Math.abs(last.amount), lastDate:last.date, nextDue, daysLeft });
   });
 
-  if(!rows.length){ p.innerHTML=''; return p; }
+  if(!rows.length){ p.hidden = true; return p; }
 
   p.innerHTML = `<h2>Регулярні платежі</h2><p class="ms-hint">Орієнтовна дата наступного платежу — останній платіж + місяць. Це не справжнє push-сповіщення (сайт без сервера не може надіслати його, поки застосунок закритий) — просто попередження тут, коли відкриваєш застосунок ближче до дати.</p><div id="recurringRows"></div>`;
   const wrap = p.querySelector('#recurringRows');

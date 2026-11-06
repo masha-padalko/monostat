@@ -32,6 +32,8 @@
   .ms-grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;align-items:start;}
   .ms-grid > *, .ms-grid3 > *{min-width:0;}
   .ms-grid .ms-panel, .ms-grid3 .ms-panel{margin-bottom:0;}
+  .ms-dashboard-stack{display:flex;flex-direction:column;gap:14px;min-width:0;}
+  .ms-dashboard-stack > .ms-panel{margin-bottom:0;}
   .ms-grid .ms-span2, .ms-grid3 .ms-span2{grid-column:1 / -1;}
   @media (max-width:680px){
     .ms-grid{grid-template-columns:1fr;}
