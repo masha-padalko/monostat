@@ -2488,21 +2488,17 @@ function buildTripsPanel(all){
           const priorityDiff = categoryPriority(a[0])-categoryPriority(b[0]);
           return priorityDiff || b[1]-a[1] || a[0].localeCompare(b[0],'uk');
         });
-        const maxCategorySpend = Math.max(1, ...categoryEntries.map(([,amount])=>amount));
         const categoryGrid = document.createElement('div');
         categoryGrid.className = 'ms-trip-visual-grid';
         categoryEntries.forEach(([cat,amount])=>{
           const categoryCard = document.createElement('div');
           categoryCard.className = 'ms-trip-category-card';
           categoryCard.style.setProperty('--trip-category-color', COLORS[cat]||'#B8863F');
-          const sharePct = sum>0 ? Math.max(0, amount)/sum*100 : 0;
-          const barPct = Math.max(0, Math.min(100, amount/maxCategorySpend*100));
           categoryCard.innerHTML = `
             <span class="ms-trip-category-icon">${escapeHtml(ICONS[cat]||'❓')}</span>
             <span class="ms-trip-category-name">${escapeHtml(cat)}</span>
             <strong class="ms-trip-category-amount">${amount<0?'−':''}${fmt(amount)} ${curSym()}</strong>
-            <span class="ms-trip-category-share">${sharePct.toFixed(0)}% поїздки</span>
-            <span class="ms-trip-category-track"><span style="width:${barPct}%"></span></span>
+            <span class="ms-trip-category-track" aria-hidden="true"></span>
           `;
           categoryGrid.appendChild(categoryCard);
         });
