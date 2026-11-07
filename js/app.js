@@ -83,9 +83,13 @@ function isPersonTransfer(desc){
 
 function categorize(desc, mcc, amount, overrides, rules){
   const d = desc.toLowerCase();
+  // small Wizz Air / Ryanair charges (under 600) are onboard snacks/coffee/seat fees, not the ticket itself.
+  // This must run BEFORE the merchant-wide override: "Ryan Air" is usually saved there as "літак"
+  // (for the ticket), which used to swallow the small onboard charges too. Any other category she
+  // chose for the merchant still wins, and a per-transaction override wins over everything.
+  const airOverride = !overrides[desc] || overrides[desc]==='Подорожі: літак' || overrides[desc]==='Путешествия транспорт: самолёт';
+  if(airOverride && (d.includes('wizz') || d.includes('ryan')) && amount < 0 && Math.abs(amount) < 600) return 'Подорожі: кава в літаку';
   if(overrides[desc]) return overrides[desc];
-  // small Wizz Air / Ryanair charges (under 600) are onboard snacks/coffee/seat fees, not the ticket itself
-  if((d.includes('wizz') || d.includes('ryan')) && amount < 0 && Math.abs(amount) < 600) return 'Подорожі: кава в літаку';
   for(const r of rules){
     for(const kw of r.kw){ if(d.includes(kw)) return r.cat; }
   }
@@ -165,6 +169,7 @@ let state = {
   jarStartDateActual: null, // when THIS tracking run actually began — fixed, unlike jarLastDate which advances to today once caught up
   jarAutoCheckedThisLoad: false, // ensures the background jar catch-up only runs once per page load, never re-fires mid-interaction
   dailyBudgetEndDate: null, // selected date through which to spread the current card balance
+  recurringHidden: [], // ids of recurring-payment rows the user hid (ms_recurring_hidden)
   editingTripDates: null, // tripId whose inline date-picker form is currently open, or null
   authChecking: true, // true only during the very first initAuth() check — avoids flashing the login form before we know a session already exists
   useCache: true, // whether to merge cached historical periods in alongside the freshly fetched range
@@ -312,6 +317,7 @@ async function loadPersisted(){
   const jdb = await storageGet('ms_jardailybudget'); if(jdb) state.jarDailyBudget = JSON.parse(jdb);
   const jsd = await storageGet('ms_jarstartdateactual'); if(jsd) state.jarStartDateActual = jsd;
   const dbed = await storageGet('ms_dailybudgetenddate'); if(dbed) state.dailyBudgetEndDate = dbed;
+  const rh = await storageGet('ms_recurring_hidden'); if(rh){ try{ state.recurringHidden = JSON.parse(rh)||[]; }catch(e){} }
   const tr = await storageGet('ms_trips'); if(tr) state.trips = JSON.parse(tr);
   const to_ = await storageGet('ms_tripof'); if(to_) state.tripOf = JSON.parse(to_);
   const cc = await storageGet('ms_customcats');
@@ -1806,31 +1812,52 @@ function buildRecurringPaymentsPanel(){
     return { label:rp.label, icon:rp.icon, lastAmt:Math.abs(last.amount), lastDate:last.date, nextDue, daysLeft };
   }).filter(Boolean);
 
-  // "Apple" bills multiple separate subscriptions at different, currency-specific
-  // amounts (iCloud, individual apps, etc.) — rather than hand-maintaining every
-  // amount she happens to notice, group every Apple charge by its exact amount+currency
-  // and treat anything that's recurred at least twice as its own tracked subscription.
+  // "Apple" bills several separate subscriptions (iCloud, apps...). Group every Apple
+  // charge by its original currency+price (stable month to month, unlike the UAH
+  // equivalent), then merge groups that are really ONE subscription whose price changed:
+  // same currency, same day of the month (+-2 days), the new price starts after the old
+  // one's last payment, within ~2 months, price change up to 40%. The newest price wins
+  // and the old one is shown as a note instead of a second, forever-"overdue" row.
   const appleTxs = history.filter(t=>t.desc.toLowerCase().includes('apple'));
   const appleGroups = {};
   appleTxs.forEach(t=>{
-    // group by the ORIGINAL currency+price (stable month to month), not the UAH
-    // equivalent (which drifts slightly with the exchange rate on each charge date)
     const k = `${t.currency}_${Math.abs(t.operationAmount).toFixed(2)}`;
     (appleGroups[k] = appleGroups[k]||[]).push(t);
   });
   const CUR_SYMBOLS = {980:'₴',978:'€',840:'$',985:'zł',946:'lei',981:'₾'};
-  Object.values(appleGroups).forEach(group=>{
-    if(group.length<2) return; // seen only once so far — not confirmed recurring yet
-    const last = group.reduce((a,b)=>a.date>b.date?a:b);
+  const dayDiff = (d1,d2)=>{ const x=Math.abs(d1-d2); return Math.min(x,31-x); };
+  const subs = Object.values(appleGroups).filter(g=>g.length>=2).map(g=>{
+    const sorted = g.slice().sort((a,b)=>a.date-b.date);
+    return { cur:g[0].currency, price:Math.abs(g[0].operationAmount), txs:sorted,
+      first:sorted[0].date, last:sorted[sorted.length-1].date, prevPrices:[] };
+  }).sort((a,b)=>a.first-b.first);
+  const merged = [];
+  subs.forEach(sub=>{
+    const prev = merged.find(m=>m.cur===sub.cur
+      && sub.first>m.last
+      && dayDiff(sub.first.getDate(), m.last.getDate())<=2
+      && Math.abs(sub.price-m.price)/m.price<=0.4
+      && (sub.first-m.last)/86400000<=62);
+    if(prev){
+      sub.prevPrices = prev.prevPrices.concat([prev.price]);
+      sub.txs = prev.txs.concat(sub.txs); sub.first = prev.first;
+      merged.splice(merged.indexOf(prev),1);
+    }
+    merged.push(sub);
+  });
+  merged.forEach(sub=>{
+    const last = sub.txs[sub.txs.length-1];
     const nextDue = new Date(last.date.getFullYear(), last.date.getMonth()+1, last.date.getDate());
     const daysLeft = Math.round((nextDue.getTime()-today.getTime())/(24*60*60*1000));
-    // `amount` (always UAH) is what actually left her account — show that, labeled ₴,
-    // same convention as every other figure in the app. The original currency/price is
-    // just mentioned alongside for context, never used as if it labeled `amount` itself.
     const opSym = CUR_SYMBOLS[last.currency] || '';
     const origNote = last.currency!==980 ? ` · ${fmt(Math.abs(last.operationAmount))} ${opSym}` : '';
-    rows.push({ label:`Apple (${fmt(Math.abs(last.amount))} ₴${origNote})`, icon:'🍎', lastAmt:Math.abs(last.amount), lastDate:last.date, nextDue, daysLeft });
+    const priceNote = sub.prevPrices.length ? `ціна виросла: ${fmt(sub.prevPrices[sub.prevPrices.length-1])} → ${fmt(sub.price)} ${opSym}` : '';
+    rows.push({ id:`apple_${last.currency}_${sub.first.getTime()}`,
+      label:`Apple (${fmt(Math.abs(last.amount))} ₴${origNote})`, icon:'🍎',
+      lastAmt:Math.abs(last.amount), lastDate:last.date, nextDue, daysLeft, note:priceNote });
   });
+  const shownRows = rows.filter(r=>!r.id || !state.recurringHidden.includes(r.id));
+  rows.length = 0; shownRows.forEach(r=>rows.push(r));
 
   if(!rows.length){ p.hidden = true; return p; }
 
@@ -1842,12 +1869,23 @@ function buildRecurringPaymentsPanel(){
     row.className = 'ms-today-cat-row';
     if(soon) row.style.background = 'rgba(184,92,74,0.08)';
     row.innerHTML = `
-      <span class="ms-today-cat-name">${r.icon} ${r.label}</span>
+      <span class="ms-today-cat-name">${r.icon} ${r.label}${r.note?`<br><small style="color:var(--muted);font-weight:400">${r.note}</small>`:''}</span>
       <span class="ms-today-cat-amt" style="color:var(--muted)">останній: ${dtStr(r.lastDate)}, ${fmt(r.lastAmt)}</span>
       <span class="ms-today-cat-amt" style="${soon?'color:var(--rust);font-weight:700':'color:var(--muted)'}">
         ${r.daysLeft<0 ? `⚠ просрочено на ${-r.daysLeft} дн.` : (soon ? `⚠ через ${r.daysLeft} дн.` : `через ${r.daysLeft} дн.`)}
       </span>
     `;
+    if(r.id){
+      const hb = document.createElement('button');
+      hb.textContent='✕'; hb.title='Приховати (це не підписка або вона скасована)';
+      hb.style.cssText='margin-left:8px;padding:2px 8px;cursor:pointer;background:none;border:1px solid var(--line,#444);border-radius:6px;color:var(--muted)';
+      hb.addEventListener('click', async()=>{
+        state.recurringHidden = state.recurringHidden.concat([r.id]);
+        render();
+        await storageSet('ms_recurring_hidden', JSON.stringify(state.recurringHidden));
+      });
+      row.appendChild(hb);
+    }
     wrap.appendChild(row);
   });
   return p;
