@@ -2014,6 +2014,9 @@ function buildCleanExpensesPanel(all, grossTotal, periodDays){
   return p;
 }
 
+// Cashback paid out to the card is taxed in Ukraine: 18% personal income tax + 5% military levy.
+const CASHBACK_TAX_RATE = 0.23;
+
 function buildBalancePanel(){
   const p = document.createElement('div');
   p.className='ms-panel';
@@ -2031,11 +2034,15 @@ function buildBalancePanel(){
     const periodCb = state.txs.reduce((sum,t)=>sum+(t.cashback||0),0);
     const cachedCb = state.txCache.reduce((sum,it)=>sum+(it.cashbackAmount||0)/100,0);
     if(periodCb > 0.004){
-      const tip = `Кешбек за обраний період, нараховано банком. У всьому кеші: ${fmt(cachedCb)} ${curSym()}`;
+      const netCb = periodCb * (1 - CASHBACK_TAX_RATE);
+      const taxPct = Math.round(CASHBACK_TAX_RATE*100);
+      const tip = `Кешбек за обраний період, нараховано банком: ${fmt(periodCb)} ${curSym()}. Після податку ${taxPct}%: ${fmt(netCb)} ${curSym()}. У всьому кеші нараховано: ${fmt(cachedCb)} ${curSym()} (після податку ${fmt(cachedCb*(1-CASHBACK_TAX_RATE))} ${curSym()}).`;
       cashbackPill = `<div class="ms-bc-cashback" title="${tip}">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v4h-4"/><path d="M9.5 9.5h3.2a1.6 1.6 0 0 1 0 3.2h-1.4a1.6 1.6 0 0 0 0 3.2h3.2M12 8v1.5M12 15.9v1.6"/></svg>
           <span>+${fmt(periodCb)} ${curSym()}</span>
           <small>кешбек</small>
+          <span class="ms-bc-cb-net">−${taxPct}% → ${fmt(netCb)} ${curSym()}</span>
+          <small>на карту</small>
         </div>`;
     }
   }
