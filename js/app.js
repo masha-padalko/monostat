@@ -369,12 +369,18 @@ async function persistTxCache(){
   await storageSet('ms_txcache', JSON.stringify(state.txCache));
 }
 function mergeIntoCache(items){
-  const known = new Set(state.txCache.map(x=>x.id));
-  let added = 0;
+  const known = new Map(state.txCache.map(x=>[x.id,x]));
+  let added = 0, updated = 0;
   items.forEach(it=>{
-    if(!known.has(it.id)){ state.txCache.push(it); known.add(it.id); added++; }
+    const cached = known.get(it.id);
+    if(!cached){ state.txCache.push(it); known.set(it.id,it); added++; return; }
+    // the comment can be added in the Monobank app after the operation was first cached
+    if(it.comment && it.comment !== cached.comment){
+      cached.comment = it.comment;
+      updated++;
+    }
   });
-  if(added>0) persistTxCache();
+  if(added>0 || updated>0) persistTxCache();
   return added;
 }
 async function clearTxCache(){
@@ -907,7 +913,9 @@ function mapRawItem(it){
     // (`currency` describes THIS, not `amount`). Needed for e.g. grouping a foreign
     // subscription by its stable original price instead of its UAH-equivalent, which
     // drifts slightly with the exchange rate from charge to charge.
-    operationAmount: it.operationAmount!==undefined ? it.operationAmount/100 : it.amount/100
+    operationAmount: it.operationAmount!==undefined ? it.operationAmount/100 : it.amount/100,
+    // text typed in the Monobank app for this operation (the API's `comment` field), if any
+    bankComment: it.comment ? String(it.comment).trim() : ''
   };
 }
 // Only my part of a shared payment counts everywhere (totals, categories, trips, charts).
@@ -1499,7 +1507,7 @@ function resultsPanel(){
     const dateStr = dtStr(t.date);
     const key = txKey(t);
     const existingNote = state.notes[key];
-    tr.dataset.search = (t.desc+' '+(existingNote||'')).toLowerCase();
+    tr.dataset.search = (t.desc+' '+(t.bankComment||'')+' '+(existingNote||'')).toLowerCase();
     const isNotExpense = !!state.notExpense[key];
     if(isNotExpense) tr.style.opacity = '.45';
 
@@ -1568,6 +1576,12 @@ function resultsPanel(){
     descLine.appendChild(descText);
     descLine.appendChild(noteBtn);
     descCell.appendChild(descLine);
+    if(t.bankComment){
+      const bankP = document.createElement('div');
+      bankP.className = 'ms-note-preview ms-bank-comment';
+      bankP.textContent = '🏦 '+t.bankComment;
+      descCell.appendChild(bankP);
+    }
     if(existingNote){
       const noteP = document.createElement('div');
       noteP.className = 'ms-note-preview';
