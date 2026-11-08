@@ -915,7 +915,9 @@ function mapRawItem(it){
     // drifts slightly with the exchange rate from charge to charge.
     operationAmount: it.operationAmount!==undefined ? it.operationAmount/100 : it.amount/100,
     // text typed in the Monobank app for this operation (the API's `comment` field), if any
-    bankComment: it.comment ? String(it.comment).trim() : ''
+    bankComment: it.comment ? String(it.comment).trim() : '',
+    // cashback the bank credited for this operation, in the account's currency (API `cashbackAmount`, minor units)
+    cashback: it.cashbackAmount ? it.cashbackAmount/100 : 0
   };
 }
 // Only my part of a shared payment counts everywhere (totals, categories, trips, charts).
@@ -2021,6 +2023,22 @@ function buildBalancePanel(){
   const acc = state.accounts.find(a=>a.id===state.selectedAccount);
   const currNames = {980:'UAH',978:'EUR',840:'USD',985:'PLN',946:'RON'};
   if(!acc){ p.innerHTML = ''; return p; }
+  // Cashback the bank credited for the operations of the selected period. The API has no
+  // "accumulated cashback balance", only a per-operation `cashbackAmount`, so this is a
+  // sum over what's loaded. Miles cards report miles, not money — don't show those as ₴.
+  let cashbackPill = '';
+  if(acc.cashbackType !== 'Miles'){
+    const periodCb = state.txs.reduce((sum,t)=>sum+(t.cashback||0),0);
+    const cachedCb = state.txCache.reduce((sum,it)=>sum+(it.cashbackAmount||0)/100,0);
+    if(periodCb > 0.004){
+      const tip = `Кешбек за обраний період, нараховано банком. У всьому кеші: ${fmt(cachedCb)} ${curSym()}`;
+      cashbackPill = `<div class="ms-bc-cashback" title="${tip}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v4h-4"/><path d="M9.5 9.5h3.2a1.6 1.6 0 0 1 0 3.2h-1.4a1.6 1.6 0 0 0 0 3.2h3.2M12 8v1.5M12 15.9v1.6"/></svg>
+          <span>+${fmt(periodCb)} ${curSym()}</span>
+          <small>кешбек</small>
+        </div>`;
+    }
+  }
   p.innerHTML = `
     <div class="ms-balance-card">
       <div class="ms-bc-top">
@@ -2032,9 +2050,12 @@ function buildBalancePanel(){
         <svg class="ms-bc-nfc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M7 6.5a8 8 0 0 1 0 11"/><path d="M11 4a12 12 0 0 1 0 16"/><path d="M15 1.5a16 16 0 0 1 0 21"/></svg>
       </div>
       <div class="ms-bc-bottom">
-        <div class="ms-bc-amount">${fmt(acc.balance/100)} ${curSym()}</div>
-        ${acc.currency!==978 ? `<p class="ms-bc-eur">${fmtEur(acc.balance/100, acc.currency).trim()}</p>` : ''}
-        <p class="ms-bc-sub">${acc.type} · ${acc.pan}</p>
+        <div class="ms-bc-bottom-main">
+          <div class="ms-bc-amount">${fmt(acc.balance/100)} ${curSym()}</div>
+          ${acc.currency!==978 ? `<p class="ms-bc-eur">${fmtEur(acc.balance/100, acc.currency).trim()}</p>` : ''}
+          <p class="ms-bc-sub">${acc.type} · ${acc.pan}</p>
+        </div>
+        ${cashbackPill}
       </div>
     </div>
   `;

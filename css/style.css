@@ -332,6 +332,11 @@
   .ms-bc-chip::before{left:0;right:0;top:50%;height:1px;}
   .ms-bc-chip::after{top:0;bottom:0;left:35%;width:1px;box-shadow:12px 0 0 rgba(60,60,66,0.45);}
   .ms-bc-nfc{width:26px;height:26px;color:rgba(255,255,255,0.75);}
+  .ms-bc-bottom{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;}
+  .ms-bc-cashback{display:flex;flex-direction:column;align-items:flex-end;gap:2px;padding:8px 12px;border-radius:14px;background:rgba(255,255,255,0.09);border:1px solid rgba(255,255,255,0.14);color:#fff;font-family:var(--font-mono);white-space:nowrap;}
+  .ms-bc-cashback svg{width:20px;height:20px;color:#e8c46a;}
+  .ms-bc-cashback span{font-size:14px;font-weight:600;}
+  .ms-bc-cashback small{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:rgba(255,255,255,0.55);}
   .ms-bc-amount{font-family:var(--font-display);font-size:32px;font-weight:600;color:#fff;margin:0 0 2px;line-height:1.1;}
   .ms-bc-eur{font-family:var(--font-mono);font-size:13px;color:rgba(255,255,255,0.55);margin:0;}
   .ms-bc-sub{font-size:12px;color:rgba(255,255,255,0.5);margin:6px 0 0;font-family:var(--font-mono);letter-spacing:.06em;}
