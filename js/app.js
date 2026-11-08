@@ -170,6 +170,7 @@ let state = {
   jarAutoCheckedThisLoad: false, // ensures the background jar catch-up only runs once per page load, never re-fires mid-interaction
   dailyBudgetEndDate: null, // selected date through which to spread the current card balance
   recurringHidden: [], // ids of recurring-payment rows the user hid (ms_recurring_hidden)
+  historySearch: {q:'', from:'', to:'', min:'', max:'', cat:'', kind:'all', limit:100}, // filters of the whole-history search panel
   editingTripDates: null, // tripId whose inline date-picker form is currently open, or null
   authChecking: true, // true only during the very first initAuth() check — avoids flashing the login form before we know a session already exists
   useCache: true, // whether to merge cached historical periods in alongside the freshly fetched range
@@ -1731,6 +1732,11 @@ function resultsPanel(){
   panelRange.style.marginBottom = '14px';
   wrap.appendChild(panelRange);
 
+  // search across the whole cached history, right under the period selector
+  const panelHistorySearch = buildHistorySearchPanel();
+  panelHistorySearch.style.marginBottom = '14px';
+  wrap.appendChild(panelHistorySearch);
+
   // row 1b: balance next to the daily-budget breakdown
   const balanceRow = document.createElement('div');
   balanceRow.className = 'ms-grid';
@@ -2468,6 +2474,120 @@ async function importCsvFiles(files){
   }
   refreshCurrentView();
   render();
+}
+
+// ---------- search across the whole cached history ----------
+// The "Всі операції" search only sees the period currently shown. This panel searches
+// every operation in the cache (all years ever loaded or imported from CSV), with filters
+// for dates, amount, category and direction, and totals for whatever was found — e.g.
+// "when did I buy sneakers" or "how much did I send to that card in total".
+function historySearchRows(){
+  const hs = state.historySearch;
+  const words = hs.q.toLowerCase().split(/\s+/).filter(Boolean);
+  const num = v=>{ const n = parseFloat(String(v).replace(',','.')); return isNaN(n) ? null : n; };
+  const minA = num(hs.min), maxA = num(hs.max);
+  const fromT = hs.from ? new Date(hs.from+'T00:00:00').getTime() : null;
+  const toT = hs.to ? new Date(hs.to+'T23:59:59').getTime() : null;
+  const out = [];
+  state.txCache.forEach(raw=>{
+    const t = mapRawItem(raw);
+    const ts = t.date.getTime();
+    if(fromT!==null && ts<fromT) return;
+    if(toT!==null && ts>toT) return;
+    const abs = Math.abs(t.amount);
+    if(minA!==null && abs<minA) return;
+    if(maxA!==null && abs>maxA) return;
+    if(hs.kind==='out' && !(t.amount<0)) return;
+    if(hs.kind==='in' && !(t.amount>0)) return;
+    const cat = categoryFor(t);
+    if(hs.cat && cat!==hs.cat) return;
+    const note = state.notes[txKey(t)] || '';
+    if(words.length){
+      const hay = (t.desc+' '+t.bankComment+' '+note+' '+cat).toLowerCase();
+      if(!words.every(w=>hay.includes(w))) return;
+    }
+    out.push({...t, cat, note});
+  });
+  out.sort((a,b)=>b.date-a.date);
+  return out;
+}
+function histDate(d){
+  const pad = n=>String(n).padStart(2,'0');
+  return `${pad(d.getDate())}.${pad(d.getMonth()+1)}.${d.getFullYear()}`;
+}
+function renderHistoryResults(panel){
+  const hs = state.historySearch;
+  const rows = historySearchRows();
+  const spent = rows.reduce((s,t)=>t.amount<0 ? s-t.amount : s, 0);
+  const income = rows.reduce((s,t)=>t.amount>0 ? s+t.amount : s, 0);
+  const sum = panel.querySelector('#hsSummary');
+  const body = panel.querySelector('#hsBody');
+  const more = panel.querySelector('#hsMore');
+  const total = state.txCache.length;
+  if(!rows.length){
+    sum.innerHTML = `Нічого не знайдено серед ${total} операцій в кеші.`;
+  }else{
+    const first = rows[rows.length-1].date, last = rows[0].date;
+    sum.innerHTML = `Знайдено: <b>${rows.length}</b> з ${total} · витрачено <b class="ms-amt-neg">−${fmt(spent)} ${curSym()}</b> · надійшло <b class="ms-amt-pos">+${fmt(income)} ${curSym()}</b> · ${histDate(first)} — ${histDate(last)}`;
+  }
+  body.innerHTML = '';
+  rows.slice(0, hs.limit).forEach(t=>{
+    const tr = document.createElement('tr');
+    const tripId = tripIdFor(t);
+    const trip = tripId ? state.trips.find(x=>x.id===tripId) : null;
+    tr.innerHTML = `<td style="white-space:nowrap">${histDate(t.date)}<div class="ms-note-preview">${String(t.date.getHours()).padStart(2,"0")}:${String(t.date.getMinutes()).padStart(2,"0")}</div></td>
+      <td>${escapeHtml(t.desc)}${t.bankComment?`<div class="ms-note-preview">🏦 ${escapeHtml(t.bankComment)}</div>`:''}${t.note?`<div class="ms-note-preview">📝 ${escapeHtml(t.note)}</div>`:''}</td>
+      <td>${escapeHtml(t.cat)}${trip?`<div class="ms-note-preview">🧳 ${escapeHtml(trip.name)}</div>`:''}</td>
+      <td style="text-align:right" class="${t.amount<0?'ms-amt-neg':'ms-amt-pos'}">${t.amount<0?'−':'+'}${fmt(Math.abs(t.amount))}</td>`;
+    body.appendChild(tr);
+  });
+  if(rows.length > hs.limit){
+    more.style.display = '';
+    more.textContent = `Показати ще 100 (залишилось ${rows.length-hs.limit})`;
+  }else{
+    more.style.display = 'none';
+  }
+}
+function buildHistorySearchPanel(){
+  const p = document.createElement('div');
+  p.className = 'ms-panel';
+  const hs = state.historySearch;
+  const catOpts = sortedCats().map(c=>`<option value="${escapeHtml(c)}"${hs.cat===c?' selected':''}>${escapeHtml(c)}</option>`).join('');
+  p.innerHTML = `<h2>Пошук по всій історії</h2>
+    <p class="ms-hint">Шукає серед усіх ${state.txCache.length} операцій у кеші (усі роки, що завантажені або імпортовані з CSV), незалежно від вибраного періоду. Кілька слів — шукає всі одразу: назва магазину, нотатка, коментар з банку, категорія або частина номера картки (наприклад, «5354»).</p>
+    <div class="ms-field" style="margin-bottom:10px"><input type="text" id="hsQ" placeholder="Наприклад: nike, кросівки, 5354, подарунок…" value="${escapeHtml(hs.q)}"></div>
+    <div class="ms-row">
+      <div class="ms-field"><label>Від дати</label><input type="date" id="hsFrom" value="${escapeHtml(hs.from)}"></div>
+      <div class="ms-field"><label>До дати</label><input type="date" id="hsTo" value="${escapeHtml(hs.to)}"></div>
+      <div class="ms-field"><label>Сума від</label><input type="number" id="hsMin" min="0" step="any" value="${escapeHtml(String(hs.min))}"></div>
+      <div class="ms-field"><label>Сума до</label><input type="number" id="hsMax" min="0" step="any" value="${escapeHtml(String(hs.max))}"></div>
+      <div class="ms-field"><label>Категорія</label><select id="hsCat"><option value="">Усі</option>${catOpts}</select></div>
+      <div class="ms-field"><label>Тип</label><select id="hsKind">
+        <option value="all"${hs.kind==='all'?' selected':''}>Усі</option>
+        <option value="out"${hs.kind==='out'?' selected':''}>Витрати</option>
+        <option value="in"${hs.kind==='in'?' selected':''}>Надходження</option></select></div>
+      <button class="ms-btn secondary" id="hsReset" title="Скинути фільтри">✕</button>
+    </div>
+    <div id="hsSummary" style="font-size:13px;color:var(--muted);margin:12px 0"></div>
+    <div class="ms-table-wrap"><table class="ms-tx"><thead><tr><th>Дата</th><th>Опис</th><th>Категорія</th><th style="text-align:right">Сума</th></tr></thead><tbody id="hsBody"></tbody></table></div>
+    <button class="ms-btn secondary" id="hsMore" style="margin-top:10px;display:none"></button>`;
+  const bind = (id, key, resetLimit=true)=>{
+    p.querySelector(id).addEventListener('input', e=>{
+      state.historySearch[key] = e.target.value;
+      if(resetLimit) state.historySearch.limit = 100;
+      renderHistoryResults(p);
+    });
+  };
+  bind('#hsQ','q'); bind('#hsFrom','from'); bind('#hsTo','to'); bind('#hsMin','min'); bind('#hsMax','max');
+  p.querySelector('#hsCat').addEventListener('change', e=>{ state.historySearch.cat = e.target.value; state.historySearch.limit = 100; renderHistoryResults(p); });
+  p.querySelector('#hsKind').addEventListener('change', e=>{ state.historySearch.kind = e.target.value; state.historySearch.limit = 100; renderHistoryResults(p); });
+  p.querySelector('#hsMore').addEventListener('click', ()=>{ state.historySearch.limit += 100; renderHistoryResults(p); });
+  p.querySelector('#hsReset').addEventListener('click', ()=>{
+    state.historySearch = {q:'', from:'', to:'', min:'', max:'', cat:'', kind:'all', limit:100};
+    render();
+  });
+  renderHistoryResults(p);
+  return p;
 }
 
 function buildDataTransferPanel(){
