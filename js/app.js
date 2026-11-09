@@ -249,7 +249,11 @@ async function requestPasswordReset(email){
   return await supabaseClient.auth.resetPasswordForEmail(email, { redirectTo: window.location.href });
 }
 
+// demo.html sets window.MS_DEMO — no auth, no Supabase, no Monobank API, nothing persisted anywhere
+const IS_DEMO = !!window.MS_DEMO;
+
 async function storageGet(key){
+  if(IS_DEMO) return null;
   if(supabaseClient && !LOCAL_ONLY_KEYS.has(key) && authUserId){
     try{
       const { data, error } = await supabaseClient.from('kv_store').select('value').eq('key', key).eq('user_id', authUserId).maybeSingle();
@@ -268,6 +272,7 @@ async function storageGet(key){
   }
 }
 async function storageSet(key, value){
+  if(IS_DEMO) return;
   if(supabaseClient && !LOCAL_ONLY_KEYS.has(key) && authUserId){
     try{
       let parsed;
@@ -312,6 +317,9 @@ async function loadPersisted(){
   const ao = await storageGet('ms_amountoverride'); if(ao) state.amountOverride = JSON.parse(ao);
   const tco = await storageGet('ms_txcatoverride'); if(tco) state.txCategoryOverride = {...state.txCategoryOverride, ...JSON.parse(tco)};
   const tc = await storageGet('ms_txcache'); if(tc){ const stored = JSON.parse(tc); const known=new Set(state.txCache.map(x=>x.id)); stored.forEach(it=>{ if(!known.has(it.id)){ state.txCache.push(it); known.add(it.id); } }); }
+  // one-off cleanup: an early demo version merged scrambled demo_* operations into the real cache
+  const realOnly = state.txCache.filter(it=>!String(it.id).startsWith('demo_'));
+  if(realOnly.length !== state.txCache.length){ state.txCache = realOnly; await persistTxCache(); }
   const jp = await storageGet('ms_jarpending'); if(jp) state.jarPending = JSON.parse(jp);
   const jld = await storageGet('ms_jarlastdate'); if(jld) state.jarLastDate = jld;
   const jps = await storageGet('ms_jarperiodstart'); if(jps) state.jarPeriodStart = jps;
@@ -886,33 +894,45 @@ async function handleConnect(){
   state.loading = false; render();
 }
 
-function handleDemoMode(){
-  if(!window.DEMO_TXS || !window.DEMO_TXS.length){
-    alert('Демо-дані не завантажені. Перевір підключення скрипту demo-data.js');
-    return;
-  }
-  state.demo = true;
-  state.accounts = [{id:'demo', pan:'●●●● ●●●● ●●●● demo', type:'black', currency:980, balance:0}];
-  state.selectedAccount = 'demo';
-  // load meta (overrides, trips, etc.) from demo export
+// Demo (demo.html only): loads window.DEMO_TXS/DEMO_META into memory. All dates are shifted
+// by whole days so the demo period always ends today and "Сьогодні/Вчора" have data.
+function startDemo(){
   const m = window.DEMO_META || {};
-  if(m.overrides) state.overrides = m.overrides;
-  if(m.customCats) state.customCats = m.customCats;
-  if(m.notExpense) state.notExpense = m.notExpense;
-  if(m.dayExcluded) state.dayExcluded = m.dayExcluded;
-  if(m.trips) state.trips = m.trips;
-  if(m.tripOf) state.tripOf = m.tripOf;
-  // today/yesterday: mark as fresh so panel shows them
-  state.todayTxs = window.DEMO_TXS
-    .filter(t=>{
-      const d = new Date(t.time*1000);
-      const key = d.toISOString().slice(0,10);
-      const today = new Date().toISOString().slice(0,10);
-      const yest = new Date(Date.now()-86400000).toISOString().slice(0,10);
-      return key===today || key===yest;
-    })
-    .map(t=>({date:new Date(t.time*1000), amount:t.amount/100, desc:(t.description||'').trim(), mcc:t.mcc, currency:t.currencyCode, operationAmount:t.operationAmount/100}));
-  mergeIntoCache(window.DEMO_TXS);
+  const raw = window.DEMO_TXS || [];
+  const dayShift = Math.round((new Date(todayStr()+'T12:00:00') - new Date((m.periodTo||todayStr())+'T12:00:00'))/864e5);
+  const sec = dayShift*86400;
+  const shiftDay = s => { if(!s) return s; const d = new Date(s+'T12:00:00'); d.setDate(d.getDate()+dayShift); return todayStr(d); };
+  const shiftKeys = obj => {
+    const r = {};
+    Object.entries(obj||{}).forEach(([k,v])=>{
+      const i = k.indexOf('|');
+      const d = new Date(k.slice(0,i)+':00Z');
+      r[isNaN(d) ? k : new Date(d.getTime()+sec*1000).toISOString().slice(0,16)+k.slice(i)] = v;
+    });
+    return r;
+  };
+  state.txCache = raw.map(t=>({...t, time: t.time+sec}));
+  state.overrides = {...state.overrides, ...(m.overrides||{})};
+  (m.customCats||[]).forEach(c=>applyCustomCategory(c, true));
+  state.txCategoryOverride = shiftKeys(m.txCategoryOverride);
+  state.notExpense = shiftKeys(m.notExpense);
+  state.dayExcluded = shiftKeys(m.dayExcluded);
+  state.amountOverride = shiftKeys(m.amountOverride);
+  state.share = shiftKeys(m.share);
+  state.tripOf = shiftKeys(m.tripOf);
+  state.trips = (m.trips||[]).map(t=>({...t, dateFrom: shiftDay(t.dateFrom), dateTo: shiftDay(t.dateTo)}));
+  state.manual = (m.manual||[]).map(x=>({...x, date: shiftDay(x.date)}));
+  state.notes = {}; state.debts = []; state.loanKeys = {}; state.usedIncoming = {};
+  state.from = shiftDay(m.periodFrom) || defaultPeriodStart();
+  state.to = todayStr();
+  const lastBal = state.txCache.length ? state.txCache.reduce((a,b)=>a.time>b.time?a:b).balance : 0;
+  state.accounts = [{id:'demo', pan:'5375 •••• •••• 0000', type:'black', currency:980, balance:lastBal}];
+  state.selectedAccount = 'demo';
+  const fromMs = new Date(state.from+'T00:00:00').getTime();
+  state.txs = state.txCache.filter(t=>t.time*1000>=fromMs).map(mapRawItem);
+  state.autoSyncDone = true; // never call the Monobank API from the demo
+  state.authChecking = false;
+  state.initialLoading = false;
   state.step = 'results';
   render();
 }
@@ -1014,14 +1034,13 @@ function parseManualJson(){
 function render(){
   const app = document.getElementById('app');
   app.innerHTML = '';
-  if(state.demo && state.step==='results'){
+  if(IS_DEMO){
+    if(state.step!=='results') return;
     const banner = document.createElement('div');
-    banner.style.cssText='background:rgba(201,165,92,.15);border:1px solid var(--gold);border-radius:8px;padding:10px 16px;margin-bottom:14px;font-size:13px;display:flex;justify-content:space-between;align-items:center;';
-    banner.innerHTML='<span>⚠️ Це демо-режим — суми і назви скрамблені. <a href="https://api.monobank.ua/" target="_blank" style="color:var(--gold)">Отримай токен ↗</a></span><button id="exitDemoBtn" style="background:transparent;border:1px solid var(--gold);border-radius:6px;color:var(--gold);padding:4px 10px;cursor:pointer;font-size:12px;">Вийти з демо</button>';
+    banner.className = 'ms-demo-banner';
+    banner.innerHTML = '<span><b>Демо-версія.</b> Реальна структура витрат за місяць, суми змінені на ±15%, імена замінені. Нічого не зберігається.</span><a class="ms-btn" href="./">Підключити свій Monobank →</a>';
     app.appendChild(banner);
-    document.getElementById('exitDemoBtn')?.addEventListener('click',()=>{state.demo=false;state.step='connect';state.txCache=[];render();});
     app.appendChild(resultsPanel());
-    updateSignOutSlot();
     return;
   }
   if(state.authChecking){
@@ -1134,10 +1153,7 @@ function connectPanel(){
     ${state.error==='connect' ? `<div class="ms-error">Не вдалося підключитися. Або токен невірний, або (найімовірніше) браузер заблокував запит через CORS — Monobank API не завжди дозволяє звертання напряму з чужих сторінок.<br><br>Запасний варіант: відкрий у новій вкладці <code>https://api.monobank.ua/personal/client-info</code> з заголовком <code>X-Token</code> (наприклад через розширення на кшталт "Requestly" чи через термінал: <code>curl -H "X-Token: ТВІЙ_ТОКЕН" https://api.monobank.ua/personal/statement/0/UNIX_FROM/UNIX_TO</code>), скопіюй відповідь і встав нижче.</div>
     <button class="ms-btn secondary" id="jsonModeBtn" style="margin-top:10px">Вставити дані вручну (JSON)</button>` : ''}
     ${state.manualJsonMode ? manualJsonBlock() : ''}
-    <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--line)">
-      <p class="ms-hint" style="margin-bottom:8px">Немає токена або хочеш просто подивитися? Завантаж демо-дані — реальна структура витрат за місяць зі скрамблованими сумами і анонімізованими іменами.</p>
-      <button class="ms-btn secondary" id="demoBtn">▶ Переглянути демо</button>
-    </div>
+    <p class="ms-hint" style="margin-top:16px">Хочеш спершу подивитися, як це виглядає? <a href="demo.html" style="color:var(--gold)">Відкрити демо-версію →</a></p>
   `;
   p.querySelector('#tokenInput').addEventListener('input', e=>state.token=e.target.value);
   p.querySelector('#rememberChk').addEventListener('change', async e=>{
@@ -1151,8 +1167,6 @@ function connectPanel(){
   p.querySelector('#connectBtn').addEventListener('click', handleConnect);
   const jbtn = p.querySelector('#jsonModeBtn');
   if(jbtn) jbtn.addEventListener('click', ()=>{state.manualJsonMode=true; render();});
-  const demoBtn = p.querySelector('#demoBtn');
-  if(demoBtn) demoBtn.addEventListener('click', handleDemoMode);
   const jarea = p.querySelector('#manualJsonArea');
   if(jarea) jarea.addEventListener('input', e=>state.manualJsonText=e.target.value);
   const jsub = p.querySelector('#manualJsonSubmit');
@@ -1218,14 +1232,14 @@ function rangePanel(){
   p.innerHTML = `
     <div class="ms-row" style="align-items:center;flex-wrap:wrap">
       <div style="flex:1;font-size:13px;color:var(--muted)">Період: <b style="color:var(--text)">${state.from} → ${state.to}</b></div>
-      <button class="ms-btn secondary" id="backBtn">Змінити період</button>
+      ${IS_DEMO ? '' : '<button class="ms-btn secondary" id="backBtn">Змінити період</button>'}
     </div>
     <div class="ms-row" style="margin-top:10px;gap:8px">
       <button class="ms-btn${state.viewTab==='current'?'':' secondary'}" id="tabCurrent" style="flex:1">Поточний період</button>
       <button class="ms-btn${state.viewTab==='previous'?'':' secondary'}" id="tabPrevious" style="flex:1">${state.viewRange?'Цикл':'Попередній місяць'} (${prevLabel})${prevCount?' · '+prevCount+' оп. в кеші':' · немає в кеші'}</button>
     </div>
   `;
-  p.querySelector('#backBtn').addEventListener('click', ()=>{state.step='accounts'; render();});
+  p.querySelector('#backBtn')?.addEventListener('click', ()=>{state.step='accounts'; render();});
   p.querySelector('#tabCurrent').addEventListener('click', ()=>{state.viewTab='current'; state.viewRange=null; render();});
   p.querySelector('#tabPrevious').addEventListener('click', ()=>{state.viewTab='previous'; state.viewRange=null; render();});
   return p;
@@ -1775,7 +1789,8 @@ function resultsPanel(){
     render();
   });
 
-  const tab = MAIN_TABS.some(t=>t.id===state.mainTab) ? state.mainTab : 'overview';
+  const tabs = IS_DEMO ? MAIN_TABS.filter(t=>t.id!=='data') : MAIN_TABS;
+  const tab = tabs.some(t=>t.id===state.mainTab) ? state.mainTab : 'overview';
 
   // panels that only live on one tab are built only when that tab is open — the long
   // single page used to build (and fill with data) every panel on every render
@@ -1794,7 +1809,7 @@ function resultsPanel(){
   const bar = document.createElement('div');
   bar.className = 'ms-tabbar';
   bar.setAttribute('role','tablist');
-  MAIN_TABS.forEach(t=>{
+  tabs.forEach(t=>{
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'ms-tab' + (t.id===tab ? ' active' : '');
@@ -3162,7 +3177,7 @@ function escapeHtml(s){
 
 // ---------- init ----------
 window.MonoStatDefaults.DEFAULT_CUSTOM_CATS.forEach(c=>applyCustomCategory(c, true));
-initAuth().then(()=>{
+if(IS_DEMO){ startDemo(); } else initAuth().then(()=>{
   state.authChecking = false;
   if(!authUserId){ state.initialLoading = false; render(); return; }
   return loadPersisted().then(()=>{

@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MonoStat — демо</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext x='50' y='72' font-size='72' text-anchor='middle'%3E%F0%9F%92%B8%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/style.css?v=20261109j">
+</head>
+<body>
+  <!--
+    Демо-версія MonoStat: той самий js/app.js, але з window.MS_DEMO = true.
+    У цьому режимі немає входу, Supabase і запитів до Monobank — дані беруться з
+    js/demo-data.js (місяць реальних операцій зі зміненими сумами та іменами)
+    і живуть лише в пам'яті сторінки.
+  -->
+  <div class="ms-root">
+    <div class="ms-inner">
+      <div class="ms-header-row">
+        <div>
+          <p class="ms-eyebrow">MonoStat · демо</p>
+          <h1 class="ms-h1">Витрати по картці, розкладені по категоріях</h1>
+        </div>
+      </div>
+
+      <div id="app"></div>
+
+      <div class="ms-footer-note">Демо-дані: реальна структура витрат за один місяць, суми змінені на ±15%, імена людей замінені. Зміни на цій сторінці ніде не зберігаються.</div>
+    </div>
+  </div>
+
+  <script>window.MS_DEMO = true;</script>
+  <script src="js/data.js?v=20261109j"></script>
+  <script src="js/demo-data.js?v=20261109j"></script>
+  <script src="js/app.js?v=20261109j"></script>
+</body>
+</html>
