@@ -1269,7 +1269,14 @@ function buildDayTxList(label, list){
     name.textContent = t.desc;
     const amt = document.createElement('span');
     amt.className = 'ms-today-cat-amt';
+    const foreignCur = t.currency && t.currency !== curCode();
     amt.textContent = fmt(Math.abs(t.amount)) + ' ' + curSym();
+    if(foreignCur && t.operationAmount){
+      const sub = document.createElement('span');
+      sub.className = 'ms-today-cat-amt-foreign';
+      sub.textContent = fmt(Math.abs(t.operationAmount)) + ' ' + (CURRENCY_SYMBOLS[t.currency]||t.currency);
+      amt.appendChild(sub);
+    }
     const sel = document.createElement('select');
     sel.className = 'ms-cat-select';
     sortedCats().forEach(c=>{
@@ -1297,7 +1304,7 @@ async function handleFetchTodayYesterday(){
     const to = new Date();
     const items = await fetchStatement(state.token.trim(), state.selectedAccount,
       Math.floor(from.getTime()/1000), Math.floor(to.getTime()/1000));
-    state.todayTxs = items.map(it=>({date:new Date(it.time*1000), amount:it.amount/100, desc: (it.description||'(без опису)').trim(), mcc: it.mcc, currency: it.currencyCode}));
+    state.todayTxs = items.map(it=>({date:new Date(it.time*1000), amount:it.amount/100, desc: (it.description||'(без опису)').trim(), mcc: it.mcc, currency: it.currencyCode, operationAmount: it.operationAmount!==undefined ? it.operationAmount/100 : it.amount/100}));
   }catch(e){
     state.todayTxs = null;
   }

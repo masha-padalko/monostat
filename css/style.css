@@ -284,7 +284,8 @@
   .ms-today-cat-row{display:flex;align-items:center;gap:8px;font-size:12.5px;padding:6px 2px;border-bottom:1px solid var(--line);flex-wrap:wrap;}
   .ms-today-cat-row:last-child{border-bottom:none;}
   .ms-today-cat-name{flex:1;min-width:90px;}
-  .ms-today-cat-amt{font-family:var(--font-mono);color:var(--text);white-space:nowrap;}
+  .ms-today-cat-amt{font-family:var(--font-mono);color:var(--text);white-space:nowrap;display:flex;flex-direction:column;align-items:flex-end;gap:1px;}
+  .ms-today-cat-amt-foreign{font-size:11px;color:var(--muted);}
   .ms-desc-line{display:flex;align-items:center;gap:6px;}
   .ms-note-btn{
     background:none;border:none;cursor:pointer;font-size:11px;opacity:.35;
