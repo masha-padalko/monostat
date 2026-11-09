@@ -1985,8 +1985,8 @@ function buildRecurringPaymentsPanel(){
     if(soon) row.style.background = 'rgba(184,92,74,0.08)';
     row.innerHTML = `
       <span class="ms-today-cat-name ms-rec-name">${brandIcon(r.icon)}<span>${r.label}${r.note?`<br><small style="color:var(--muted);font-weight:400">${r.note}</small>`:''}</span></span>
-      <span class="ms-today-cat-amt" style="color:var(--muted)">останній: ${dtStr(r.lastDate)}, ${fmt(r.lastAmt)}</span>
-      <span class="ms-today-cat-amt" style="${soon?'color:var(--rust);font-weight:700':'color:var(--muted)'}">
+      <span class="ms-rec-meta">останній ${r.lastDate.toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'})} · ${fmt(r.lastAmt)} ₴</span>
+      <span class="ms-rec-meta" style="${soon?'color:var(--rust);font-weight:700':''}">
         ${r.daysLeft<0 ? `⚠ просрочено на ${-r.daysLeft} дн.` : (soon ? `⚠ через ${r.daysLeft} дн.` : `через ${r.daysLeft} дн.`)}
       </span>
     `;
