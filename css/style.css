@@ -45,6 +45,9 @@
   .ms-tab:hover{background:rgba(0,0,0,.14);color:#1a1308!important;border-color:rgba(0,0,0,.28);}
   .ms-tab.active{background:var(--gold, #c9a55c);border-color:var(--gold, #c9a55c);color:#1a1308!important;font-weight:600;opacity:1;}
   .ms-tab-ic{opacity:1;}
+  .ms-rec-name{display:flex;align-items:center;gap:10px;}
+  .ms-brand-ic{flex:0 0 26px;width:26px;height:26px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;}
+  .ms-brand-ic svg{width:14px;height:14px;fill:#fff;}
   .ms-demo-banner{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;background:#F5EAD4;border:1px solid var(--gold);border-radius:10px;padding:12px 16px;margin-bottom:14px;font-size:13px;}
   .ms-demo-banner .ms-btn{text-decoration:none;white-space:nowrap;}
   @media (max-width:680px){.ms-tab{padding:9px 11px;font-size:13px;}.ms-tab-ic{display:none;}}

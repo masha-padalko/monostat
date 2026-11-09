@@ -1886,14 +1886,21 @@ function resultsPanel(){
 // due date (last payment + ~1 month) and highlights it once it's within 2 days.
 // She sees the warning whenever she opens the app around that time, which is the
 // honest, actually-deliverable version of "remind me".
+// Brand logos for "Регулярні платежі" (paths from simple-icons, CC0): white glyph on a round badge in the brand colour.
+const BRAND_ICONS = {"orange":{"hex":"FF7900","path":"M0 0h24v24H0V0Zm3.43 20.572h17.143v-3.429H3.43v3.429Z"},"vodafone":{"hex":"E60000","path":"M12 0A12 12 0 0 0 0 12A12 12 0 0 0 12 24A12 12 0 0 0 24 12A12 12 0 0 0 12 0M16.25 1.12C16.57 1.12 16.9 1.15 17.11 1.22C14.94 1.67 13.21 3.69 13.22 6C13.22 6.05 13.22 6.11 13.23 6.17C16.87 7.06 18.5 9.25 18.5 12.28C18.54 15.31 16.14 18.64 12.09 18.65C8.82 18.66 5.41 15.86 5.39 11.37C5.38 8.4 7 5.54 9.04 3.85C11.04 2.19 13.77 1.13 16.25 1.12Z"},"claude":{"hex":"D97757","path":"m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"},"google":{"hex":"4285F4","path":"M12.48 10.92v3.28h7.84c-.24 1.84-.853 3.187-1.787 4.133-1.147 1.147-2.933 2.4-6.053 2.4-4.827 0-8.6-3.893-8.6-8.72s3.773-8.72 8.6-8.72c2.6 0 4.507 1.027 5.907 2.347l2.307-2.307C18.747 1.44 16.133 0 12.48 0 5.867 0 .307 5.387.307 12s5.56 12 12.173 12c3.573 0 6.267-1.173 8.373-3.36 2.16-2.16 2.84-5.213 2.84-7.667 0-.76-.053-1.467-.173-2.053H12.48z"},"youtube":{"hex":"FF0000","path":"M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"},"icloud":{"hex":"3693F3","path":"M13.762 4.29a6.51 6.51 0 0 0-5.669 3.332 3.571 3.571 0 0 0-1.558-.36 3.571 3.571 0 0 0-3.516 3A4.918 4.918 0 0 0 0 14.796a4.918 4.918 0 0 0 4.92 4.914 4.93 4.93 0 0 0 .617-.045h14.42c2.305-.272 4.041-2.258 4.043-4.589v-.009a4.594 4.594 0 0 0-3.727-4.508 6.51 6.51 0 0 0-6.511-6.27z"},"apple":{"hex":"000000","path":"M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"}};
+function brandIcon(key){
+  const ic = BRAND_ICONS[key];
+  if(!ic) return key || '';
+  return `<span class="ms-brand-ic" style="background:#${ic.hex}" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="${ic.path}"/></svg></span>`;
+}
 const RECURRING_PAYMENTS = [
-  {label:'Orange', icon:'📱', match:['orange']},
+  {label:'Orange', icon:'orange', match:['orange']},
   // amounts vary month to month (155-310) depending on what she tops up, but a
   // short-term internet package (e.g. 75) isn't the monthly cycle payment at all —
   // a floor well above that filters those out without needing an exact amount match
-  {label:'Vodafone', icon:'📶', match:['vodafone'], minAmount:100},
-  {label:'Claude', icon:'🤖', match:['claude']},
-  {label:'Google', icon:'🔍', match:['google']},
+  {label:'Vodafone', icon:'vodafone', match:['vodafone'], minAmount:100},
+  {label:'Claude', icon:'claude', match:['claude']},
+  {label:'Google', icon:'google', match:['google']},
 ];
 function buildRecurringPaymentsPanel(){
   const p = document.createElement('div');
@@ -1958,7 +1965,10 @@ function buildRecurringPaymentsPanel(){
     const origNote = last.currency!==980 ? ` · ${fmt(Math.abs(last.operationAmount))} ${opSym}` : '';
     const priceNote = sub.prevPrices.length ? `ціна виросла: ${fmt(sub.prevPrices[sub.prevPrices.length-1])} → ${fmt(sub.price)} ${opSym}` : '';
     rows.push({ id:`apple_${last.currency}_${sub.first.getTime()}`,
-      label:`Apple (${fmt(Math.abs(last.amount))} ₴${origNote})`, icon:'🍎',
+      // her ~$7–9 Apple subscription is YouTube Premium; the small one (~$1) is iCloud storage
+      ...(sub.price>=5
+        ? {label:`YouTube Premium · Apple (${fmt(Math.abs(last.amount))} ₴${origNote})`, icon:'youtube'}
+        : {label:`iCloud · Apple (${fmt(Math.abs(last.amount))} ₴${origNote})`, icon:'icloud'}),
       lastAmt:Math.abs(last.amount), lastDate:last.date, nextDue, daysLeft, note:priceNote });
   });
   const shownRows = rows.filter(r=>!r.id || !state.recurringHidden.includes(r.id));
@@ -1974,7 +1984,7 @@ function buildRecurringPaymentsPanel(){
     row.className = 'ms-today-cat-row';
     if(soon) row.style.background = 'rgba(184,92,74,0.08)';
     row.innerHTML = `
-      <span class="ms-today-cat-name">${r.icon} ${r.label}${r.note?`<br><small style="color:var(--muted);font-weight:400">${r.note}</small>`:''}</span>
+      <span class="ms-today-cat-name ms-rec-name">${brandIcon(r.icon)}<span>${r.label}${r.note?`<br><small style="color:var(--muted);font-weight:400">${r.note}</small>`:''}</span></span>
       <span class="ms-today-cat-amt" style="color:var(--muted)">останній: ${dtStr(r.lastDate)}, ${fmt(r.lastAmt)}</span>
       <span class="ms-today-cat-amt" style="${soon?'color:var(--rust);font-weight:700':'color:var(--muted)'}">
         ${r.daysLeft<0 ? `⚠ просрочено на ${-r.daysLeft} дн.` : (soon ? `⚠ через ${r.daysLeft} дн.` : `через ${r.daysLeft} дн.`)}
