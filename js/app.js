@@ -460,6 +460,17 @@ async function setTripCategoryNote(tripId, category){
   await persistTrips();
 }
 // Trip of a transaction: an explicit choice wins ('none' = manually removed from any trip);
+// Cover photo for a trip's total card, picked by the trip's name; no match → no image.
+const TRIP_COVERS = [
+  {match:/стамбул|istanbul/i, alt:'Стамбул — мечеть Султанахмет',
+   src:'https://www.vash-otdyh.by/images/Blog/Turkey/Istanbul/%D0%9C%D0%B5%D1%87%D0%B5%D1%82%D1%8C_%D0%A1%D1%83%D0%BB%D1%82%D0%B0%D0%BD%D0%B0%D1%85%D0%BC%D0%B5%D1%82_%D0%B2_%D0%A1%D1%82%D0%B0%D0%BC%D0%B1%D1%83%D0%BB%D0%B5.jpg'},
+  {match:/іспан|испан|spain|españa/i, alt:'Іспанія',
+   src:'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQIEhuou_XZvNE2nK1idh_OYIbVGM6uCBsXB9zz1ivTSQ&s=10'},
+];
+function tripCoverHtml(name){
+  const c = TRIP_COVERS.find(x=>x.match.test(name||''));
+  return c ? `<img class="ms-trip-cover-image" src="${c.src}" alt="${c.alt}">` : '';
+}
 // otherwise it falls into the trip whose dates cover its (local) day. Narrowest range wins on overlap.
 function tripIdFor(t){
   const v = state.tripOf[txKey(t)];
@@ -2952,7 +2963,7 @@ function buildTripsPanel(all){
         const totalCard = document.createElement('div');
         totalCard.className = 'ms-trip-total-card';
         totalCard.innerHTML = `
-          <img class="ms-trip-cover-image" src="https://www.vash-otdyh.by/images/Blog/Turkey/Istanbul/%D0%9C%D0%B5%D1%87%D0%B5%D1%82%D1%8C_%D0%A1%D1%83%D0%BB%D1%82%D0%B0%D0%BD%D0%B0%D1%85%D0%BC%D0%B5%D1%82_%D0%B2_%D0%A1%D1%82%D0%B0%D0%BC%D0%B1%D1%83%D0%BB%D0%B5.jpg" alt="Стамбул — мечеть Султанахмет">
+          ${tripCoverHtml(trip.name)}
           <span class="ms-trip-total-label">Разом за подорож</span>
           <strong class="ms-trip-total-amount">${fmt(sum)} ${curSym()}</strong>
         `;
