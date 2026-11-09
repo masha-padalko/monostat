@@ -942,6 +942,9 @@ function startDemo(){
   const fromMs = new Date(state.from+'T00:00:00').getTime();
   state.txs = state.txCache.filter(t=>t.time*1000>=fromMs).map(mapRawItem);
   state.autoSyncDone = true; // never call the Monobank API from the demo
+  // "Скільки можна витрачати на день": in the demo spread the balance until the coming 20th
+  const t20 = new Date(); if(t20.getDate() >= 20) t20.setMonth(t20.getMonth()+1); t20.setDate(20);
+  state.dailyBudgetEndDate = todayStr(t20);
   state.authChecking = false;
   state.initialLoading = false;
   state.step = 'results';
@@ -1049,7 +1052,7 @@ function render(){
     if(state.step!=='results') return;
     const banner = document.createElement('div');
     banner.className = 'ms-demo-banner';
-    banner.innerHTML = '<span><b>Демо-версія.</b> Реальна структура витрат за місяць, суми змінені на ±15%, імена замінені. Нічого не зберігається.</span><a class="ms-btn" href="./">Підключити свій Monobank →</a>';
+    banner.innerHTML = '<span><b>Демо-версія.</b> Реальна структура витрат за місяць, суми змінені на ±15%, імена замінені. Нічого не зберігається.</span>';
     app.appendChild(banner);
     app.appendChild(resultsPanel());
     return;
