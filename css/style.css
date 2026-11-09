@@ -41,10 +41,12 @@
   }
   .ms-tabbar{display:flex;gap:6px;overflow-x:auto;margin:0 0 16px;padding-bottom:2px;border-bottom:1px solid var(--line, rgba(255,255,255,.12));scrollbar-width:thin;}
   .ms-tab{flex:0 0 auto;display:inline-flex;align-items:center;gap:7px;background:transparent;border:0;border-bottom:2px solid transparent;color:inherit;opacity:.65;font:inherit;font-size:14px;padding:10px 14px;cursor:pointer;white-space:nowrap;}
+  .ms-row-now{grid-template-columns:minmax(0,1fr) minmax(0,.85fr) minmax(0,1.7fr);}
   .ms-tab:hover{opacity:1;}
   .ms-tab.active{opacity:1;border-bottom-color:var(--gold, #c9a55c);color:var(--gold, #c9a55c);}
   @media (max-width:680px){.ms-tab{padding:9px 11px;font-size:13px;}.ms-tab-ic{display:none;}}
-  @media (max-width:1100px) and (min-width:681px){.ms-row-now{grid-template-columns:1fr 1fr;}.ms-row-now > :first-child{grid-column:1 / -1;}}
+  @media (max-width:1100px) and (min-width:681px){.ms-row-now{grid-template-columns:1fr 1.4fr;}.ms-row-now > :first-child{grid-column:1 / -1;}}
+  @media (max-width:680px){.ms-row-now{grid-template-columns:1fr;}}
   .ms-eyebrow{
     font-family:var(--font-mono);
     font-size:11px;
