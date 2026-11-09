@@ -886,6 +886,19 @@ async function handleConnect(){
   state.loading = false; render();
 }
 
+function handleDemoMode(){
+  if(!window.DEMO_TXS || !window.DEMO_TXS.length){
+    alert('Демо-дані не завантажені. Перевір підключення скрипту demo-data.js');
+    return;
+  }
+  state.demo = true;
+  state.accounts = [{id:'demo', pan:'●●●● ●●●● ●●●● demo', type:'black', currency:980, balance:0}];
+  state.selectedAccount = 'demo';
+  mergeIntoCache(window.DEMO_TXS);
+  state.step = 'results';
+  render();
+}
+
 async function handleFetchStatement(){
   state.error = null;
   state.loading = true; render();
@@ -983,6 +996,16 @@ function parseManualJson(){
 function render(){
   const app = document.getElementById('app');
   app.innerHTML = '';
+  if(state.demo && state.step==='results'){
+    const banner = document.createElement('div');
+    banner.style.cssText='background:rgba(201,165,92,.15);border:1px solid var(--gold);border-radius:8px;padding:10px 16px;margin-bottom:14px;font-size:13px;display:flex;justify-content:space-between;align-items:center;';
+    banner.innerHTML='<span>⚠️ Це демо-режим — суми і назви скрамблені. <a href="https://api.monobank.ua/" target="_blank" style="color:var(--gold)">Отримай токен ↗</a></span><button id="exitDemoBtn" style="background:transparent;border:1px solid var(--gold);border-radius:6px;color:var(--gold);padding:4px 10px;cursor:pointer;font-size:12px;">Вийти з демо</button>';
+    app.appendChild(banner);
+    document.getElementById('exitDemoBtn')?.addEventListener('click',()=>{state.demo=false;state.step='connect';state.txCache=[];render();});
+    app.appendChild(resultsPanel());
+    updateSignOutSlot();
+    return;
+  }
   if(state.authChecking){
     app.appendChild(authCheckingPanel());
   }else if(!authUserId){
@@ -1093,6 +1116,10 @@ function connectPanel(){
     ${state.error==='connect' ? `<div class="ms-error">Не вдалося підключитися. Або токен невірний, або (найімовірніше) браузер заблокував запит через CORS — Monobank API не завжди дозволяє звертання напряму з чужих сторінок.<br><br>Запасний варіант: відкрий у новій вкладці <code>https://api.monobank.ua/personal/client-info</code> з заголовком <code>X-Token</code> (наприклад через розширення на кшталт "Requestly" чи через термінал: <code>curl -H "X-Token: ТВІЙ_ТОКЕН" https://api.monobank.ua/personal/statement/0/UNIX_FROM/UNIX_TO</code>), скопіюй відповідь і встав нижче.</div>
     <button class="ms-btn secondary" id="jsonModeBtn" style="margin-top:10px">Вставити дані вручну (JSON)</button>` : ''}
     ${state.manualJsonMode ? manualJsonBlock() : ''}
+    <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--line)">
+      <p class="ms-hint" style="margin-bottom:8px">Немає токена або хочеш просто подивитися? Завантаж демо-дані — реальна структура витрат за місяць зі скрамблованими сумами і анонімізованими іменами.</p>
+      <button class="ms-btn secondary" id="demoBtn">▶ Переглянути демо</button>
+    </div>
   `;
   p.querySelector('#tokenInput').addEventListener('input', e=>state.token=e.target.value);
   p.querySelector('#rememberChk').addEventListener('change', async e=>{
@@ -1106,6 +1133,8 @@ function connectPanel(){
   p.querySelector('#connectBtn').addEventListener('click', handleConnect);
   const jbtn = p.querySelector('#jsonModeBtn');
   if(jbtn) jbtn.addEventListener('click', ()=>{state.manualJsonMode=true; render();});
+  const demoBtn = p.querySelector('#demoBtn');
+  if(demoBtn) demoBtn.addEventListener('click', handleDemoMode);
   const jarea = p.querySelector('#manualJsonArea');
   if(jarea) jarea.addEventListener('input', e=>state.manualJsonText=e.target.value);
   const jsub = p.querySelector('#manualJsonSubmit');
