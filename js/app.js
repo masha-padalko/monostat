@@ -149,6 +149,7 @@ let state = {
   expandedCats: {},
   expandedBlocks: {transactions:false, incoming:false}, // accordion-style "show more" for the 3-col panels
   notes: {...window.MonoStatDefaults.DEFAULT_NOTES},         // txKey -> free-text note about that specific transaction
+  mainTab: (function(){ try{ const h=(location.hash||'').slice(1); return ['overview','history','trips','ops','data'].includes(h)?h:'overview'; }catch(e){ return 'overview'; } })(),
   dayExcluded: {...window.MonoStatDefaults.DEFAULT_DAY_EXCLUDED},     // txKey -> true if unchecked in "Зараз" (excluded from today/yesterday total)
   notExpense: {...window.MonoStatDefaults.DEFAULT_NOT_EXPENSE},       // txKey -> true — flagged as "not a real expense" (refunded/recharged, fund contribution, etc.) for "Чисті трати"
   syncedRanges: [],      // [[fromUnix,toUnix],...] — periods already fetched/imported completely, so gap detection doesn't re-request them
@@ -1303,6 +1304,13 @@ async function handleFetchTodayYesterday(){
   state.todayLoading = false; render();
 }
 
+const MAIN_TABS = [
+  {id:'overview', icon:'📊', label:'Огляд'},
+  {id:'history',  icon:'🔎', label:'Пошук по історії'},
+  {id:'trips',    icon:'✈️', label:'Подорожі та події'},
+  {id:'ops',      icon:'🧾', label:'Операції за місяць'},
+  {id:'data',     icon:'💾', label:'Дані та імпорт'},
+];
 function resultsPanel(){
   const p = document.createElement('div');
 
@@ -1713,12 +1721,11 @@ function resultsPanel(){
     render();
   });
 
+  const tab = MAIN_TABS.some(t=>t.id===state.mainTab) ? state.mainTab : 'overview';
+
+  // panels that only live on one tab are built only when that tab is open — the long
+  // single page used to build (and fill with data) every panel on every render
   const panelBalance = buildBalancePanel();
-  const panelIncoming = buildIncomingPanel();
-  const panelTransfer = buildDataTransferPanel();
-  const panelCustomCat = buildCustomCategoryPanel();
-  const panelTrips = buildTripsPanel(getAllHistoricalExpenses());
-  const panelRecurring = buildRecurringPaymentsPanel();
   const panelRange = rangePanel();
   if(state.jarEnabled && !state.jarAutoCheckedThisLoad && (state.jarPeriodStart !== defaultPeriodStart() || !state.jarLastDate || state.jarLastDate < todayStr())){
     state.jarAutoCheckedThisLoad = true;
@@ -1727,66 +1734,73 @@ function resultsPanel(){
   const panelDailyBudget = buildDailyBudgetPanel(all);
 
   const wrap = document.createElement('div');
+  const gap = el => { el.style.marginBottom = '14px'; return el; };
 
-  // row 1: period selector, full width on its own
-  panelRange.style.marginBottom = '14px';
-  wrap.appendChild(panelRange);
+  // tab bar
+  const bar = document.createElement('div');
+  bar.className = 'ms-tabbar';
+  bar.setAttribute('role','tablist');
+  MAIN_TABS.forEach(t=>{
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'ms-tab' + (t.id===tab ? ' active' : '');
+    b.setAttribute('role','tab');
+    b.setAttribute('aria-selected', t.id===tab ? 'true' : 'false');
+    b.innerHTML = `<span class="ms-tab-ic" aria-hidden="true">${t.icon}</span><span class="ms-tab-label">${t.label}</span>`;
+    b.addEventListener('click', ()=>{
+      if(state.mainTab===t.id) return;
+      state.mainTab = t.id;
+      try{ history.replaceState(null,'','#'+t.id); }catch(e){}
+      render();
+      window.scrollTo({top:0});
+    });
+    bar.appendChild(b);
+  });
+  wrap.appendChild(bar);
 
-  // search across the whole cached history, right under the period selector
-  const panelHistorySearch = buildHistorySearchPanel();
-  panelHistorySearch.style.marginBottom = '14px';
-  wrap.appendChild(panelHistorySearch);
+  if(tab==='overview'){
+    gap(panelRange); wrap.appendChild(panelRange);
 
-  // row 1b: balance next to the daily-budget breakdown
-  const balanceRow = document.createElement('div');
-  balanceRow.className = 'ms-grid';
-  balanceRow.style.marginBottom = '14px';
-  balanceRow.appendChild(panelBalance);
-  balanceRow.appendChild(panelDailyBudget);
-  wrap.appendChild(balanceRow);
+    // one row: black card · how much can be spent per day · "Зараз"
+    const nowRow = document.createElement('div');
+    nowRow.className = 'ms-grid3 ms-row-now';
+    nowRow.appendChild(panelBalance);
+    nowRow.appendChild(panelDailyBudget);
+    nowRow.appendChild(panelToday);
+    gap(nowRow); wrap.appendChild(nowRow);
 
-  // row 2: overview (where balance used to be) next to today/yesterday
-  const topRow = document.createElement('div');
-  topRow.className = 'ms-grid';
-  topRow.style.marginBottom = '14px';
-  topRow.appendChild(panel1);
-  const todayStack = document.createElement('div');
-  todayStack.className = 'ms-dashboard-stack';
-  todayStack.appendChild(panelToday);
-  if(!panelRecurring.hidden) todayStack.appendChild(panelRecurring);
-  topRow.appendChild(todayStack);
-  wrap.appendChild(topRow);
+    const panelRecurring = buildRecurringPaymentsPanel();
+    const topRow = document.createElement('div');
+    topRow.className = 'ms-grid';
+    topRow.appendChild(panel1);
+    if(!panelRecurring.hidden){
+      const stack = document.createElement('div');
+      stack.className = 'ms-dashboard-stack';
+      stack.appendChild(panelRecurring);
+      topRow.appendChild(stack);
+    }
+    gap(topRow); wrap.appendChild(topRow);
 
-  // two-column row: all transactions (2/3) / incoming (1/3) — each can expand downward in place
-  const threeCol = document.createElement('div');
-  threeCol.className = 'ms-grid ms-grid-2-1';
-  threeCol.style.marginBottom = '14px';
-  threeCol.appendChild(panel2);
-  threeCol.appendChild(panelIncoming);
-  wrap.appendChild(threeCol);
-
-  // small settings-style panels side by side
-  const bottomRow = document.createElement('div');
-  bottomRow.className = 'ms-grid';
-  bottomRow.style.marginBottom = '14px';
-  bottomRow.appendChild(panelCustomCat);
-  bottomRow.appendChild(panelTransfer);
-  wrap.appendChild(bottomRow);
-
-  // manual cash entry — moved down, its own full-width row near the bottom
-  panel3.style.marginBottom = '14px';
-  wrap.appendChild(panel3);
-
-  // monthly comparison bar chart — full history, own full-width row
-  const panelMonthly = buildMonthlyBarChart();
-  panelMonthly.style.marginBottom = '14px';
-  wrap.appendChild(panelMonthly);
-
-  // big standalone section at the very bottom, separate from everything above — trips
-  const divider = document.createElement('div');
-  divider.className = 'ms-section-divider';
-  wrap.appendChild(divider);
-  wrap.appendChild(panelTrips);
+    wrap.appendChild(gap(buildMonthlyBarChart()));
+  }else if(tab==='history'){
+    wrap.appendChild(gap(buildHistorySearchPanel()));
+  }else if(tab==='trips'){
+    wrap.appendChild(buildTripsPanel(getAllHistoricalExpenses()));
+  }else if(tab==='ops'){
+    gap(panelRange); wrap.appendChild(panelRange);
+    const threeCol = document.createElement('div');
+    threeCol.className = 'ms-grid ms-grid-2-1';
+    threeCol.appendChild(panel2);
+    threeCol.appendChild(buildIncomingPanel());
+    gap(threeCol); wrap.appendChild(threeCol);
+    wrap.appendChild(gap(panel3));
+  }else if(tab==='data'){
+    const bottomRow = document.createElement('div');
+    bottomRow.className = 'ms-grid';
+    bottomRow.appendChild(buildCustomCategoryPanel());
+    bottomRow.appendChild(buildDataTransferPanel());
+    wrap.appendChild(bottomRow);
+  }
 
   p.appendChild(wrap);
   return p;
