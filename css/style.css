@@ -40,10 +40,11 @@
     .ms-grid3{grid-template-columns:1fr;}
   }
   .ms-tabbar{display:flex;gap:6px;overflow-x:auto;margin:0 0 16px;padding-bottom:0;border-bottom:none;scrollbar-width:thin;}
-  .ms-tab{flex:0 0 auto;display:inline-flex;align-items:center;gap:7px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.13);border-radius:8px;color:rgba(255,255,255,.65);font:inherit;font-size:14px;padding:9px 15px;cursor:pointer;white-space:nowrap;transition:background .15s,color .15s,border-color .15s;}
+  .ms-tab{flex:0 0 auto;display:inline-flex;align-items:center;gap:7px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.22);border-radius:8px;color:#fff;font:inherit;font-size:14px;padding:9px 15px;cursor:pointer;white-space:nowrap;transition:background .15s,color .15s,border-color .15s;}
   .ms-row-now{grid-template-columns:minmax(360px,1.15fr) minmax(0,.75fr) minmax(0,1.6fr);}
-  .ms-tab:hover{background:rgba(255,255,255,.13);color:#fff;border-color:rgba(255,255,255,.25);}
+  .ms-tab:hover{background:rgba(255,255,255,.2);color:#fff;border-color:rgba(255,255,255,.35);}
   .ms-tab.active{background:var(--gold, #c9a55c);border-color:var(--gold, #c9a55c);color:#1a1308;font-weight:600;opacity:1;}
+  .ms-tab-ic{opacity:1;}
   @media (max-width:680px){.ms-tab{padding:9px 11px;font-size:13px;}.ms-tab-ic{display:none;}}
   @media (max-width:1100px) and (min-width:681px){.ms-row-now{grid-template-columns:1fr 1.4fr;}.ms-row-now > :first-child{grid-column:1 / -1;}}
   @media (max-width:680px){.ms-row-now{grid-template-columns:1fr;}}

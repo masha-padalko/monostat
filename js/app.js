@@ -894,6 +894,24 @@ function handleDemoMode(){
   state.demo = true;
   state.accounts = [{id:'demo', pan:'●●●● ●●●● ●●●● demo', type:'black', currency:980, balance:0}];
   state.selectedAccount = 'demo';
+  // load meta (overrides, trips, etc.) from demo export
+  const m = window.DEMO_META || {};
+  if(m.overrides) state.overrides = m.overrides;
+  if(m.customCats) state.customCats = m.customCats;
+  if(m.notExpense) state.notExpense = m.notExpense;
+  if(m.dayExcluded) state.dayExcluded = m.dayExcluded;
+  if(m.trips) state.trips = m.trips;
+  if(m.tripOf) state.tripOf = m.tripOf;
+  // today/yesterday: mark as fresh so panel shows them
+  state.todayTxs = window.DEMO_TXS
+    .filter(t=>{
+      const d = new Date(t.time*1000);
+      const key = d.toISOString().slice(0,10);
+      const today = new Date().toISOString().slice(0,10);
+      const yest = new Date(Date.now()-86400000).toISOString().slice(0,10);
+      return key===today || key===yest;
+    })
+    .map(t=>({date:new Date(t.time*1000), amount:t.amount/100, desc:(t.description||'').trim(), mcc:t.mcc, currency:t.currencyCode, operationAmount:t.operationAmount/100}));
   mergeIntoCache(window.DEMO_TXS);
   state.step = 'results';
   render();
