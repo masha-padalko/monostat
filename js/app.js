@@ -1267,16 +1267,22 @@ function buildTodayPanel(all){
   const yestKey = daysAgoStr(1);
 
   const inRange = (key)=> state.from && state.to && key>=state.from && key<=state.to;
-  const haveFresh = inRange(todayKey) || inRange(yestKey) || state.todayTxs;
+  const dayOf = t => t.date instanceof Date ? todayStr(t.date) : String(t.date).slice(0,10);
+  const isTodayOrYest = t => { const k = dayOf(t); return k===todayKey || k===yestKey; };
+  const asExpense = list => list
+    .filter(t=>t.amount<0 && !state.loanKeys[txKey(t)])
+    .map(t=>applyShare({...t, cat: categoryFor(t)}));
 
-  let source;
-  if(inRange(todayKey) || inRange(yestKey)){
-    source = all;
-  }else{
-    source = (state.todayTxs || [])
-      .filter(t=>t.amount<0 && !state.loanKeys[txKey(t)])
-      .map(t=>({...t, cat: categoryFor(t)}));
-  }
+  // Today/yesterday don't depend on the selected period: on the 10th the new cycle starts,
+  // and yesterday (the 9th) belongs to the previous one — so also pull those two days from
+  // the cache of everything already fetched, plus the separate last-48h fetch, deduped.
+  const seen = new Set();
+  const source = [];
+  const add = t => { const k = txKey(t); if(!seen.has(k)){ seen.add(k); source.push(t); } };
+  if(inRange(todayKey) || inRange(yestKey)) all.filter(isTodayOrYest).forEach(add);
+  asExpense(state.txCache.map(mapRawItem).filter(isTodayOrYest)).forEach(add);
+  asExpense((state.todayTxs || []).filter(isTodayOrYest)).forEach(add);
+  const haveFresh = inRange(todayKey) || inRange(yestKey) || !!state.todayTxs || source.length>0;
 
   const forDay = (key)=> source.filter(t=>{
     const k = t.date instanceof Date ? todayStr(t.date) : String(t.date).slice(0,10);
