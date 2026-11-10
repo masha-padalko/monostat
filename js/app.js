@@ -1099,6 +1099,7 @@ function authPanel(){
     <button class="ms-icon-btn" id="forgotPasswordBtn" style="margin-top:8px;opacity:.8;text-decoration:underline">Забула пароль?</button>
     ${state.authError ? `<div class="ms-error">${escapeHtml(state.authError)}</div>` : ''}
     ${state.authNotice ? `<p class="ms-hint" style="color:var(--teal)">${escapeHtml(state.authNotice)}</p>` : ''}
+    <p class="ms-hint" style="margin-top:14px"><a href="https://api.monobank.ua/" target="_blank" rel="noopener noreferrer" style="color:var(--gold);text-decoration:none">Отримати токен Monobank ↗</a></p>
   `;
   const doAuth = async (fn)=>{
     const email = p.querySelector('#authEmail').value.trim();
@@ -1261,7 +1262,7 @@ function rangePanel(){
 
 function buildTodayPanel(all){
   const p = document.createElement('div');
-  p.className='ms-panel';
+  p.className='ms-panel ms-card';
 
   const todayKey = todayStr();
   const yestKey = daysAgoStr(1);
@@ -1840,8 +1841,9 @@ function resultsPanel(){
     render();
   });
 
-  const tabs = IS_DEMO ? MAIN_TABS.filter(t=>t.id!=='data') : MAIN_TABS;
-  const tab = tabs.some(t=>t.id===state.mainTab) ? state.mainTab : 'overview';
+  const tabs = MAIN_TABS;
+  const isTabDisabled = id => IS_DEMO && id==='data'; // nothing to save or import in the demo
+  const tab = tabs.some(t=>t.id===state.mainTab && !isTabDisabled(t.id)) ? state.mainTab : 'overview';
 
   // panels that only live on one tab are built only when that tab is open — the long
   // single page used to build (and fill with data) every panel on every render
@@ -1868,6 +1870,12 @@ function resultsPanel(){
     b.setAttribute('role','tab');
     b.setAttribute('aria-selected', t.id===tab ? 'true' : 'false');
     b.innerHTML = `<span class="ms-tab-ic" aria-hidden="true">${t.icon}</span><span class="ms-tab-label">${t.label}</span>`;
+    if(isTabDisabled(t.id)){
+      b.disabled = true;
+      b.title = 'Недоступно в демо-версії';
+      bar.appendChild(b);
+      return;
+    }
     b.addEventListener('click', ()=>{
       if(state.mainTab===t.id) return;
       state.mainTab = t.id;
@@ -2357,10 +2365,9 @@ function buildDailyBudgetPanel(all){
     ${state.jarEnabled ? `
     <div style="margin-top:14px">
       <div class="ms-field" style="max-width:260px;margin-bottom:12px">
-        <label for="dailyBudgetEndDate">Розрахувати до дати</label>
+        <label for="dailyBudgetEndDate" title="Баланс ${fmt(acc.balance/100)} ${curSym()} ÷ ${days} дн. (до ${endDateLabel}, включно)">Розрахувати до дати · ${days} дн.</label>
         <input type="date" id="dailyBudgetEndDate" min="${today}" value="${endDate}">
       </div>
-      <div class="ms-hint" style="margin:0">Баланс ${fmt(acc.balance/100)} ${curSym()} ÷ ${days} дн. (до ${endDateLabel}, включно)</div>
       <div class="ms-today-amt" style="font-size:24px;color:var(--gold)">${fmt(dailyBudget)} ${curSym()}</div>
       <div class="ms-hint" style="margin:0;opacity:.8">${fmtEur(dailyBudget, curCode()).trim()}</div>
     </div>

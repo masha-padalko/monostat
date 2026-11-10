@@ -504,3 +504,5 @@
     padding-right:32px !important;
   }
   .ms-root select:not([multiple]):hover{border-color:var(--gold);}
+  .ms-tab:disabled{opacity:.45 !important;cursor:not-allowed;}
+  .ms-tab:disabled:hover{background:rgba(0,0,0,.08);border-color:rgba(0,0,0,.18);}
