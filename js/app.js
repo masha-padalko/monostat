@@ -1593,26 +1593,80 @@ function resultsPanel(){
 
   const panel2 = document.createElement('div');
   panel2.className='ms-panel';
-  panel2.innerHTML = `<h2>Всі операції</h2><p class="ms-hint">Категорію можна змінити прямо тут — вибір запам'ятається для цього мерчанта надалі. Іконкою 📝 можна додати нотатку до конкретної покупки — що це було насправді. У колонці «Поїздка» можна прив'язати трату до конкретної подорожі (створюються нижче, в «Подорожі»). Галочка «чисто» — познач, якщо це насправді не витрата (повернули гроші, поповнення фонду тощо) — вплине на «Чисті трати» нижче.</p>
+  panel2.innerHTML = `<h2>Всі операції</h2><p class="ms-hint">Натисни на операцію, щоб змінити категорію (запам'ятається для цього мерчанта), прив'язати її до поїздки, позначити як «не витрата», вказати свою частку або додати нотатку.</p>
     <div class="ms-field" style="margin-bottom:10px">
       <input type="text" id="txSearchInput" placeholder="Пошук за описом або власною нотаткою…" value="${escapeHtml(state.txSearchQuery||'')}">
     </div>
     <div style="font-size:13px;color:var(--muted);margin-bottom:12px" id="txSearchSummary">Разом витрачено: <b style="color:var(--gold);font-family:var(--font-mono)">${fmt(total)} ${curSym()}</b>${fmtEur(total, curCode())} · ${all.length} операцій</div>
-    <div class="ms-table-wrap"><table class="ms-tx ms-tx-main"><thead><tr><th>Дата</th><th>Опис</th><th>Категорія</th><th>Поїздка</th><th title="Не витрата">Чисто</th><th style="text-align:right">Сума</th></tr></thead><tbody id="txBody"></tbody></table></div>`;
+    <div class="ms-txlist" id="txBody"></div>`;
   const tbody = panel2.querySelector('#txBody');
+  const todayK = todayStr(), yestK = daysAgoStr(1);
+  const dayTotals = {};
+  all.forEach(t=>{ const k = todayStr(t.date); if(!state.notExpense[txKey(t)]) dayTotals[k] = (dayTotals[k]||0) + Math.abs(t.amount); });
   let prevDayKey = null;
   all.sort((a,b)=>b.date-a.date).forEach(t=>{
-    const tr = document.createElement('tr');
-    const dateStr = dtStr(t.date);
     const key = txKey(t);
     const existingNote = state.notes[key];
-    tr.dataset.search = (t.desc+' '+(t.bankComment||'')+' '+(existingNote||'')).toLowerCase();
     const isNotExpense = !!state.notExpense[key];
-    if(isNotExpense) tr.style.opacity = '.45';
-
     const dayKey = todayStr(t.date);
-    if(prevDayKey!==null && dayKey!==prevDayKey) tr.classList.add('ms-day-border');
-    prevDayKey = dayKey;
+
+    // day header: "Сьогодні ... −542 ₴"
+    if(dayKey!==prevDayKey){
+      const h = document.createElement('div');
+      h.className = 'ms-txday';
+      h.dataset.day = dayKey;
+      const label = dayKey===todayK ? 'Сьогодні' : dayKey===yestK ? 'Вчора'
+        : t.date.toLocaleDateString('uk-UA',{weekday:'long', day:'numeric', month:'long'});
+      h.innerHTML = `<span>${label}</span><span class="ms-txday-sum">−${fmt(dayTotals[dayKey]||0)} ${curSym()}</span>`;
+      tbody.appendChild(h);
+      prevDayKey = dayKey;
+    }
+
+    const item = document.createElement('div');
+    item.className = 'ms-txitem' + (isNotExpense ? ' is-muted' : '') + (state.expandedTx && state.expandedTx[key] ? ' is-open' : '');
+    item.dataset.search = (t.desc+' '+(t.bankComment||'')+' '+(existingNote||'')).toLowerCase();
+    item.dataset.day = dayKey;
+
+    const row = document.createElement('div');
+    row.className = 'ms-txrow';
+    row.tabIndex = 0;
+    const color = COLORS[t.cat] || '#8C7A5C';
+    const tripId = tripIdFor(t);
+    const tripName = tripId ? (state.trips.find(x=>x.id===tripId)||{}).name : '';
+    const time = t.manual ? 'ручне' : t.date.toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'});
+    const foreign = !t.manual && t.currency && t.currency!==curCode() && t.operationAmount;
+    row.innerHTML = `
+      <span class="ms-txicon" style="background:${color}22;color:${color}">${ICONS[t.cat]||'•'}</span>
+      <span class="ms-txmain">
+        <span class="ms-txdesc"></span>
+        <span class="ms-txsub">${time} · ${escapeHtml(t.cat)}${tripName?` · ✈️ ${escapeHtml(tripName)}`:''}${isNotExpense?' · не витрата':''}</span>
+      </span>
+      <span class="ms-txamt">
+        <span class="ms-amt-neg">−${fmt(t.amount)}</span>
+        ${t.share ? `<small>з −${fmt(t.fullAmount)} · ${Math.round(t.share*100)}%</small>` : ''}
+        ${foreign ? `<small>${fmt(Math.abs(t.operationAmount))} ${CURRENCY_SYMBOLS[t.currency]||''}</small>` : ''}
+      </span>`;
+    row.querySelector('.ms-txdesc').textContent = t.desc + (existingNote ? ' 📝' : '');
+    if(t.bankComment || existingNote){
+      const notes = document.createElement('span');
+      notes.className = 'ms-txnote';
+      notes.textContent = [t.bankComment ? '🏦 '+t.bankComment : '', existingNote||''].filter(Boolean).join(' · ');
+      row.querySelector('.ms-txmain').appendChild(notes);
+    }
+    const toggle = ()=>{
+      state.expandedTx = state.expandedTx || {};
+      const open = !item.classList.contains('is-open');
+      item.classList.toggle('is-open', open);
+      if(open) state.expandedTx[key] = true; else delete state.expandedTx[key];
+    };
+    row.addEventListener('click', toggle);
+    row.addEventListener('keydown', e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); toggle(); } });
+    item.appendChild(row);
+
+    // edit area, shown when the row is open
+    const edit = document.createElement('div');
+    edit.className = 'ms-txedit';
+    const field = (label, el)=>{ const f = document.createElement('label'); f.className='ms-txfield'; f.innerHTML = `<span>${label}</span>`; f.appendChild(el); edit.appendChild(f); };
 
     const sel = document.createElement('select');
     sel.className='ms-cat-select';
@@ -1622,28 +1676,33 @@ function resultsPanel(){
       if(c===t.cat) opt.selected=true;
       sel.appendChild(opt);
     });
-    sel.addEventListener('change', e=>{
-      handleCategoryChange(t, e.target.value);
-    });
+    sel.addEventListener('change', e=>{ handleCategoryChange(t, e.target.value); });
+    field('Категорія', sel);
 
-    tr.innerHTML = `<td>${dateStr}${t.manual?' <span class="ms-tag">ручне</span>':''}</td><td></td><td></td><td></td><td style="text-align:center"></td><td style="text-align:right" class="ms-amt-neg">−${fmt(t.amount)}</td>`
+    if(state.trips.length){
+      const tripSel = document.createElement('select');
+      tripSel.className = 'ms-cat-select';
+      const noneOpt = document.createElement('option');
+      noneOpt.value = ''; noneOpt.textContent = '—';
+      tripSel.appendChild(noneOpt);
+      state.trips.forEach(tr2=>{
+        const opt = document.createElement('option');
+        opt.value = tr2.id; opt.textContent = tr2.name;
+        if(tripId===tr2.id) opt.selected = true;
+        tripSel.appendChild(opt);
+      });
+      tripSel.addEventListener('change', e=>{ assignTrip(key, e.target.value); });
+      field('Поїздка', tripSel);
+    }
 
     if(!t.manual){
-      const amtCell = tr.children[5];
-      if(t.share){
-        const real = document.createElement('div');
-        real.className = 'ms-share-real';
-        real.textContent = `з −${fmt(t.fullAmount)} · ${Math.round(t.share*100)}%`;
-        amtCell.appendChild(real);
-      }
       const shareSel = document.createElement('select');
-      shareSel.className = 'ms-share-sel';
-      shareSel.title = 'Моя частка цієї витрати (якщо платила за двох)';
+      shareSel.className = 'ms-cat-select';
       const cur = t.share ? Math.round(t.share*100) : 100;
       [['100','Вся моя'],['50','50%'],['33','33%'],['25','25%'],['custom','Своя сума…']].forEach(([v,label])=>{
         const o = document.createElement('option');
-        o.value = v; o.textContent = v==='100' ? '÷' : label;
-        if(v===String(cur) || (v==='100' && cur===100)) o.selected = true;
+        o.value = v; o.textContent = label;
+        if(v===String(cur)) o.selected = true;
         shareSel.appendChild(o);
       });
       if(t.share && ![50,33,25].includes(cur)){
@@ -1659,73 +1718,43 @@ function resultsPanel(){
         }else if(v==='cur'){ /* keep as is */ }
         else setShare(key, parseInt(v,10)/100);
       });
-      amtCell.appendChild(shareSel);
-    };
-
-    const descCell = tr.children[1];
-    const descLine = document.createElement('div');
-    descLine.className = 'ms-desc-line';
-    const descText = document.createElement('span');
-    descText.textContent = t.desc;
-    const noteBtn = document.createElement('button');
-    noteBtn.className = 'ms-note-btn'+(existingNote?' has-note':'');
-    noteBtn.textContent = '📝';
-    noteBtn.title = existingNote ? 'Редагувати нотатку' : 'Додати нотатку';
-    noteBtn.addEventListener('click', ()=>noteButtonHandler(t, key, existingNote));
-    descLine.appendChild(descText);
-    descLine.appendChild(noteBtn);
-    descCell.appendChild(descLine);
-    if(t.bankComment){
-      const bankP = document.createElement('div');
-      bankP.className = 'ms-note-preview ms-bank-comment';
-      bankP.textContent = '🏦 '+t.bankComment;
-      descCell.appendChild(bankP);
-    }
-    if(existingNote){
-      const noteP = document.createElement('div');
-      noteP.className = 'ms-note-preview';
-      noteP.textContent = existingNote;
-      descCell.appendChild(noteP);
+      field('Моя частка', shareSel);
     }
 
-    const catCell = tr.children[2];
-    catCell.appendChild(sel);
-
-    const tripCell = tr.children[3];
-    if(state.trips.length===0){
-      tripCell.innerHTML = '<span style="color:var(--muted);font-size:11px">—</span>';
-    }else{
-      const tripSel = document.createElement('select');
-      tripSel.className = 'ms-cat-select';
-      const noneOpt = document.createElement('option');
-      noneOpt.value = ''; noneOpt.textContent = '—';
-      tripSel.appendChild(noneOpt);
-      state.trips.forEach(tr2=>{
-        const opt = document.createElement('option');
-        opt.value = tr2.id; opt.textContent = tr2.name;
-        if(tripIdFor(t)===tr2.id) opt.selected = true;
-        tripSel.appendChild(opt);
-      });
-      tripSel.addEventListener('change', e=>{ assignTrip(key, e.target.value); });
-      tripCell.appendChild(tripSel);
-    }
-
-    const cleanCell = tr.children[4];
+    const cleanWrap = document.createElement('label');
+    cleanWrap.className = 'ms-txcheck';
+    cleanWrap.title = 'Повернули гроші, поповнення фонду тощо — не рахується в «Чисті трати»';
     const cleanChk = document.createElement('input');
     cleanChk.type = 'checkbox';
     cleanChk.checked = isNotExpense;
-    cleanChk.title = 'Позначити як "не витрата" (повернули гроші, поповнення фонду тощо)';
     cleanChk.addEventListener('change', e=>toggleNotExpense(key, e.target.checked));
-    cleanCell.appendChild(cleanChk);
+    cleanWrap.appendChild(cleanChk);
+    cleanWrap.appendChild(document.createTextNode(' Не витрата'));
+    edit.appendChild(cleanWrap);
 
-    tbody.appendChild(tr);
+    const noteBtn = document.createElement('button');
+    noteBtn.type = 'button';
+    noteBtn.className = 'ms-btn secondary ms-txnote-btn';
+    noteBtn.textContent = existingNote ? '📝 Змінити нотатку' : '📝 Нотатка';
+    noteBtn.addEventListener('click', ()=>noteButtonHandler(t, key, existingNote));
+    edit.appendChild(noteBtn);
+
+    item.appendChild(edit);
+    tbody.appendChild(item);
   });
 
   const TX_PREVIEW_COUNT = 8;
-  const txRows = [...tbody.children];
+  const txRows = [...tbody.querySelectorAll('.ms-txitem')];
+  // a day header is visible only if at least one of its operations is
+  const syncDayHeaders = ()=>{
+    tbody.querySelectorAll('.ms-txday').forEach(h=>{
+      h.style.display = txRows.some(r=>r.dataset.day===h.dataset.day && r.style.display!=='none') ? '' : 'none';
+    });
+  };
   let txToggleBtn = null;
   if(txRows.length > TX_PREVIEW_COUNT && !state.expandedBlocks.transactions){
     txRows.slice(TX_PREVIEW_COUNT).forEach(r=>r.style.display='none');
+    syncDayHeaders();
     const moreBtn = document.createElement('button');
     moreBtn.className = 'ms-btn secondary';
     moreBtn.style.width = '100%';
@@ -1754,6 +1783,7 @@ function resultsPanel(){
     state.txSearchQuery = e.target.value; // remembered for display only, doesn't trigger render
     if(!q){
       txRows.forEach((r,i)=>{ r.style.display = (i<TX_PREVIEW_COUNT || state.expandedBlocks.transactions) ? '' : 'none'; });
+      syncDayHeaders();
       if(txToggleBtn) txToggleBtn.style.display = '';
       txSearchSummary.innerHTML = `Разом витрачено: <b style="color:var(--gold);font-family:var(--font-mono)">${fmt(total)} ${curSym()}</b>${fmtEur(total, curCode())} · ${all.length} операцій`;
       return;
@@ -1764,6 +1794,7 @@ function resultsPanel(){
       r.style.display = match ? '' : 'none';
       if(match) matchCount++;
     });
+    syncDayHeaders();
     if(txToggleBtn) txToggleBtn.style.display = 'none';
     txSearchSummary.innerHTML = `Знайдено: <b style="color:var(--gold);font-family:var(--font-mono)">${matchCount}</b> з ${all.length} операцій`;
   });
@@ -1823,6 +1854,7 @@ function resultsPanel(){
   const panelDailyBudget = buildDailyBudgetPanel(all);
 
   const wrap = document.createElement('div');
+  wrap.className = 'ms-results';
   const gap = el => { el.style.marginBottom = '14px'; return el; };
 
   // tab bar
@@ -1892,7 +1924,27 @@ function resultsPanel(){
   }
 
   p.appendChild(wrap);
+  collapseHints(wrap);
   return p;
+}
+
+// Minimal look: the explanatory paragraph right under a block's title becomes a small ⓘ
+// next to the title — hover shows the text, a click unfolds it. Hints with links or
+// controls (and data lines that aren't right under the title) stay as they are.
+function collapseHints(root){
+  root.querySelectorAll('.ms-panel h2 + p.ms-hint').forEach(hint=>{
+    if(hint.querySelector('a,input,button,select,label')) return;
+    const h2 = hint.previousElementSibling;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ms-info';
+    btn.textContent = 'i';
+    btn.title = hint.textContent.trim();
+    btn.setAttribute('aria-label','Пояснення');
+    hint.classList.add('ms-hint-collapsed');
+    btn.addEventListener('click', e=>{ e.stopPropagation(); hint.classList.toggle('ms-hint-collapsed'); });
+    h2.appendChild(btn);
+  });
 }
 
 // Groups every cached expense by calendar month and renders a simple CSS bar chart —
@@ -2283,7 +2335,7 @@ async function updateJarAccumulation(){
 // total in real time, and gets permanently locked in once the day rolls over.
 function buildDailyBudgetPanel(all){
   const p = document.createElement('div');
-  p.className = 'ms-panel';
+  p.className = 'ms-panel ms-card';
   const acc = state.accounts.find(a=>a.id===state.selectedAccount);
   if(!acc){ p.innerHTML = ''; return p; }
 
