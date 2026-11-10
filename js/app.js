@@ -2145,21 +2145,26 @@ function buildBalancePanel(){
   const acc = state.accounts.find(a=>a.id===state.selectedAccount);
   const currNames = {980:'UAH',978:'EUR',840:'USD',985:'PLN',946:'RON'};
   if(!acc){ p.innerHTML = ''; return p; }
-  // Cashback the bank credited for the operations of the selected period. The API has no
-  // "accumulated cashback balance", only a per-operation `cashbackAmount`, so this is a
-  // sum over what's loaded. Miles cards report miles, not money — don't show those as ₴.
+  // Cashback accumulated since the last "Виведення кешбеку" (cashback withdrawal) — what's
+  // actually sitting in Monobank now, independent of the selected period (on the 10th a new
+  // period starts and a period-only sum would drop to almost zero). The API has no
+  // "accumulated cashback balance", only a per-operation `cashbackAmount`, so it's summed
+  // over every cached operation after the last withdrawal. Miles cards report miles, not money.
   let cashbackPill = '';
   if(acc.cashbackType !== 'Miles'){
+    const isWithdrawal = it => /виведення кешбеку|cashback withdrawal/i.test(it.description||'');
+    const lastW = state.txCache.filter(isWithdrawal).reduce((m,it)=>it.time>m?it.time:m, 0);
+    const accCb = state.txCache.filter(it=>it.time>lastW).reduce((sum,it)=>sum+(it.cashbackAmount||0)/100,0);
     const periodCb = state.txs.reduce((sum,t)=>sum+(t.cashback||0),0);
-    const cachedCb = state.txCache.reduce((sum,it)=>sum+(it.cashbackAmount||0)/100,0);
-    if(periodCb > 0.004){
-      const netCb = periodCb * (1 - CASHBACK_TAX_RATE);
+    if(accCb > 0.004){
+      const netCb = accCb * (1 - CASHBACK_TAX_RATE);
       const taxPct = Math.round(CASHBACK_TAX_RATE*100);
-      const tip = `Кешбек за обраний період, нараховано банком: ${fmt(periodCb)} ${curSym()}. Після податку ${taxPct}%: ${fmt(netCb)} ${curSym()}. У всьому кеші нараховано: ${fmt(cachedCb)} ${curSym()} (після податку ${fmt(cachedCb*(1-CASHBACK_TAX_RATE))} ${curSym()}).`;
+      const sinceLabel = lastW ? new Date(lastW*1000).toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'}) : '';
+      const tip = `Кешбек, накопичений ${lastW ? 'з останнього виведення ('+sinceLabel+')' : 'за всі завантажені операції'}: ${fmt(accCb)} ${curSym()}. Після податку ${taxPct}%: ${fmt(netCb)} ${curSym()}. За обраний період: ${fmt(periodCb)} ${curSym()}.`;
       cashbackPill = `<div class="ms-bc-cashback" title="${tip}">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v4h-4"/><path d="M9.5 9.5h3.2a1.6 1.6 0 0 1 0 3.2h-1.4a1.6 1.6 0 0 0 0 3.2h3.2M12 8v1.5M12 15.9v1.6"/></svg>
-          <span>+${fmt(periodCb)} ${curSym()}</span>
-          <small>кешбек</small>
+          <span>+${fmt(accCb)} ${curSym()}</span>
+          <small>кешбек${lastW ? ' з '+sinceLabel : ''}</small>
           <span class="ms-bc-cb-net">−${taxPct}% → ${fmt(netCb)} ${curSym()}</span>
           <small>на карту</small>
         </div>`;
