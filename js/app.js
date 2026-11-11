@@ -154,6 +154,7 @@ let state = {
   notExpense: {...window.MonoStatDefaults.DEFAULT_NOT_EXPENSE},       // txKey -> true — flagged as "not a real expense" (refunded/recharged, fund contribution, etc.) for "Чисті трати"
   syncedRanges: [],      // [[fromUnix,toUnix],...] — periods already fetched/imported completely, so gap detection doesn't re-request them
   sync: {running:false, msg:'', done:0, total:0},
+  refresh: {status:'idle', msg:'', code:''}, // background refresh after an instant start: idle | loading | ok | error
   importMsg: '',
   lastApiCall: 0,
   autoSyncDone: false,
@@ -871,7 +872,8 @@ function reconstructBalanceAtStartOfDay(dateStr){
 
 // ---------- API ----------
 async function fetchClientInfo(token){
-  state.lastApiCall = Date.now();
+  // no state.lastApiCall here: Monobank limits each endpoint separately, and that timer
+  // only paces statement requests (runSync) — a 429 there is retried anyway
   const res = await fetch('https://api.monobank.ua/personal/client-info', {headers:{'X-Token':token}});
   if(!res.ok) throw new Error('HTTP '+res.status);
   return res.json();
@@ -884,15 +886,121 @@ async function fetchStatement(token, account, fromUnix, toUnix){
   return res.json();
 }
 
+function mapAccounts(info){
+  return (info.accounts||[]).map(a=>({
+    id:a.id, pan: (a.maskedPan&&a.maskedPan[0])||(a.iban||'').slice(-6), type:a.type,
+    currency:a.currencyCode, balance:a.balance
+  }));
+}
+
+// ---------- instant start ----------
+// With a remembered token there is nothing to ask on a return visit: the dashboard opens
+// straight from the cached history, and fresh data is fetched in the background. For that
+// the last card list + chosen card are remembered next to the token — in this browser
+// only, never in Supabase — and tied to the signed-in user.
+const ACCOUNTS_SNAPSHOT_KEY = 'monostat_ms_accounts';
+function saveAccountsSnapshot(){
+  if(IS_DEMO || !authUserId || !state.rememberToken || !state.selectedAccount) return;
+  try{
+    localStorage.setItem(ACCOUNTS_SNAPSHOT_KEY, JSON.stringify({userId:authUserId, accounts:state.accounts, selectedAccount:state.selectedAccount}));
+  }catch(e){ /* storage unavailable — next visit just goes through the steps again */ }
+}
+function loadAccountsSnapshot(){
+  try{
+    const snap = JSON.parse(localStorage.getItem(ACCOUNTS_SNAPSHOT_KEY)||'null');
+    if(!snap || snap.userId!==authUserId || !Array.isArray(snap.accounts)) return null;
+    if(!snap.accounts.some(a=>a.id===snap.selectedAccount)) return null;
+    return snap;
+  }catch(e){ return null; }
+}
+function clearAccountsSnapshot(){
+  try{ localStorage.removeItem(ACCOUNTS_SNAPSHOT_KEY); }catch(e){}
+}
+
+// Called once saved data is loaded (page open or sign-in).
+function autoStart(){
+  if(!state.token.trim() || !state.rememberToken){ render(); return; }
+  const snap = loadAccountsSnapshot();
+  if(!snap){ handleConnect(); return; } // first visit with this token: connect by itself, she only picks the card
+  state.accounts = snap.accounts;
+  state.selectedAccount = snap.selectedAccount;
+  state.viewTab = 'current';
+  state.step = 'results';
+  refreshCurrentView(); // current period straight from the cache — no request, no waiting
+  render();
+  refreshInBackground();
+}
+
+// Fresh balance + current-period statement, without blocking what is already on screen.
+async function refreshInBackground(){
+  if(state.refresh.status==='loading') return;
+  const token = state.token.trim();
+  const account = state.selectedAccount;
+  const from = state.from, to = state.to;
+  state.refresh = {status:'loading', msg:'', code:''};
+  updateRefreshNote();
+  const fromUnix = Math.floor(new Date(from+'T00:00:00').getTime()/1000);
+  const toUnix = Math.floor(new Date(to+'T23:59:59').getTime()/1000);
+  const [infoRes, stRes] = await Promise.allSettled([
+    fetchClientInfo(token),
+    fetchStatement(token, account, fromUnix, toUnix)
+  ]);
+  // she may have changed the card/period (or signed out) while the requests were running
+  const stillSame = state.step==='results' && state.selectedAccount===account && state.from===from && state.to===to && !!authUserId;
+  if(infoRes.status==='fulfilled'){
+    const accounts = mapAccounts(infoRes.value);
+    if(stillSame && accounts.some(a=>a.id===account)){ state.accounts = accounts; saveAccountsSnapshot(); }
+  }
+  if(stRes.status==='fulfilled'){
+    const items = stRes.value;
+    mergeIntoCache(items);
+    if(items.length < 500) addSyncedRange(fromUnix, Math.min(toUnix, Math.floor(Date.now()/1000)));
+    if(stillSame){
+      if(items.length < 500) ingestTransactions(items);
+      else refreshCurrentView(); // response capped at 500 — show the cache, autoSync fetches the rest
+      await updateJarAccumulation();
+    }
+  }
+  const failed = [infoRes, stRes].find(r=>r.status==='rejected');
+  if(!failed){
+    state.refresh = {status:'ok', msg:'Оновлено о '+new Date().toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'}), code:''};
+  }else{
+    const m = String(failed.reason && failed.reason.message || failed.reason);
+    const code = m.includes('403') ? 'token' : m.includes('429') ? 'limit' : 'network';
+    const msg = code==='token' ? 'Monobank не прийняв токен — показую збережені дані.'
+      : code==='limit' ? 'Monobank дозволяє оновлення раз на хвилину — показую збережені дані.'
+      : 'Не вдалося оновити (немає зв\'язку?) — показую збережені дані.';
+    state.refresh = {status:'error', msg, code};
+  }
+  if(!stillSame) return;
+  render();
+  if(state.refresh.code!=='token') setTimeout(autoSync, 0); // fills the tail / recent holes, waiting out the rate limit itself
+}
+function refreshNoteHtml(){
+  const r = state.refresh;
+  if(r.status==='loading') return '<span class="ms-spin"></span>Оновлюю дані з Monobank…';
+  if(r.status==='ok') return escapeHtml(r.msg);
+  if(r.status==='error') return `<span style="color:var(--rust)">${escapeHtml(r.msg)}</span> <button class="ms-icon-btn" id="refreshRetryBtn" style="text-decoration:underline">Повторити</button>${r.code==='token' ? ' <button class="ms-icon-btn" id="refreshTokenBtn" style="text-decoration:underline">Змінити токен</button>' : ''}`;
+  return '';
+}
+function bindRefreshNote(el){
+  el.querySelector('#refreshRetryBtn')?.addEventListener('click', refreshInBackground);
+  el.querySelector('#refreshTokenBtn')?.addEventListener('click', ()=>{ state.step='connect'; render(); });
+}
+// targeted update — a full render() here would reset whatever she is doing on the page
+function updateRefreshNote(){
+  const el = document.getElementById('refreshNote');
+  if(!el) return;
+  el.innerHTML = refreshNoteHtml();
+  bindRefreshNote(el);
+}
+
 async function handleConnect(){
   state.error = null;
   state.loading = true; render();
   try{
     const info = await fetchClientInfo(state.token.trim());
-    state.accounts = info.accounts.map(a=>({
-      id:a.id, pan: (a.maskedPan&&a.maskedPan[0])||a.iban.slice(-6), type:a.type,
-      currency:a.currencyCode, balance:a.balance
-    }));
+    state.accounts = mapAccounts(info);
     // default to her main card by mask; falls back to the first account if it's not found
     const DEFAULT_PAN = '444111******0137';
     const preferred = state.accounts.find(a=>a.pan===DEFAULT_PAN);
@@ -963,6 +1071,8 @@ async function handleFetchStatement(){
     ingestTransactions(items);
     state.viewTab = 'current';
     state.step = 'results';
+    state.refresh = {status:'ok', msg:'Оновлено о '+new Date().toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'}), code:''};
+    saveAccountsSnapshot(); // next visit opens straight on the dashboard with this card
     await updateJarAccumulation(); // finish this BEFORE the first render of results, no stale flash
   }catch(e){
     state.error = 'statement';
@@ -1113,7 +1223,8 @@ function authPanel(){
     await loadPersisted();
     if(!state.from) state.from = defaultPeriodStart(); // was missing — caused NaN/NaN in the statement URL
     if(!state.to) state.to = todayStr();
-    render();
+    state.initialLoading = false;
+    autoStart();
   };
   p.querySelector('#authSignInBtn').addEventListener('click', ()=>doAuth(signIn));
   p.querySelector('#authSignUpBtn').addEventListener('click', ()=>doAuth(signUp));
@@ -1177,6 +1288,7 @@ function connectPanel(){
       await storageSet('ms_token', state.token.trim());
     }else if(!state.rememberToken){
       await storageSet('ms_token', '');
+      clearAccountsSnapshot();
     }
   });
   p.querySelector('#connectBtn').addEventListener('click', handleConnect);
@@ -1218,6 +1330,7 @@ function accountsPanel(){
     <p class="ms-hint" style="margin-top:8px">Максимум — 31 доба за раз (обмеження API).</p>
     <p class="ms-hint">У кеші зараз ${state.txCache.length} операцій з минулих завантажень — після завантаження нового періоду попередній місяць можна буде глянути окремою вкладкою «Попередній місяць», без нового запиту.</p>
     ${state.txCache.length ? `<button class="ms-btn secondary" id="clearCacheBtn" style="margin-top:10px">Очистити кеш (${state.txCache.length} оп.)</button>` : ''}
+    <button class="ms-btn secondary" id="changeTokenBtn" style="margin-top:10px">Змінити токен</button>
     ${state.error==='statement' ? '<div class="ms-error">Не вдалося отримати виписку. Перевір період (не більше 31 дня) і що з моменту підключення пройшло хоч трохи часу — API дозволяє один запит на 60 секунд.</div>':''}
   `;
   const list = p.querySelector('#accList');
@@ -1231,6 +1344,7 @@ function accountsPanel(){
   p.querySelector('#fromInput').addEventListener('input', e=>state.from=e.target.value);
   p.querySelector('#toInput').addEventListener('input', e=>state.to=e.target.value);
   p.querySelector('#loadBtn').addEventListener('click', handleFetchStatement);
+  p.querySelector('#changeTokenBtn').addEventListener('click', ()=>{state.step='connect'; render();});
   const clearBtn = p.querySelector('#clearCacheBtn');
   if(clearBtn) clearBtn.addEventListener('click', ()=>{
     if(confirm('Очистити весь локальний кеш минулих періодів? Дію не можна скасувати (але сама виписка на сервері Monobank нікуди не дінеться — можна буде завантажити знову).')) clearTxCache();
@@ -1249,12 +1363,14 @@ function rangePanel(){
       <div style="flex:1;font-size:13px;color:var(--muted)">Період: <b style="color:var(--text)">${state.from} → ${state.to}</b></div>
       ${IS_DEMO ? '' : '<button class="ms-btn secondary" id="backBtn">Змінити період</button>'}
     </div>
+    ${IS_DEMO ? '' : `<div class="ms-hint" id="refreshNote" style="margin:6px 0 0">${refreshNoteHtml()}</div>`}
     <div class="ms-row" style="margin-top:10px;gap:8px">
       <button class="ms-btn${state.viewTab==='current'?'':' secondary'}" id="tabCurrent" style="flex:1">Поточний період</button>
       <button class="ms-btn${state.viewTab==='previous'?'':' secondary'}" id="tabPrevious" style="flex:1">${state.viewRange?'Цикл':'Попередній місяць'} (${prevLabel})${prevCount?' · '+prevCount+' оп. в кеші':' · немає в кеші'}</button>
     </div>
   `;
   p.querySelector('#backBtn')?.addEventListener('click', ()=>{state.step='accounts'; render();});
+  bindRefreshNote(p);
   p.querySelector('#tabCurrent').addEventListener('click', ()=>{state.viewTab='current'; state.viewRange=null; render();});
   p.querySelector('#tabPrevious').addEventListener('click', ()=>{state.viewTab='previous'; state.viewRange=null; render();});
   return p;
@@ -3278,7 +3394,7 @@ if(IS_DEMO){ startDemo(); } else initAuth().then(()=>{
     state.from = defaultPeriodStart(); // her budgeting month runs from the 10th (payday) to the 10th
     state.to = todayStr();
     state.initialLoading = false;
-    render();
+    autoStart();
   });
 }).catch(err=>{
   document.getElementById('app').innerHTML = '<div style="color:#E3AA9C;font-family:monospace;padding:20px;white-space:pre-wrap">Помилка ініціалізації: '+(err&&err.message)+'</div>';
