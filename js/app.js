@@ -515,6 +515,35 @@ function tripIdFor(t){
   });
   return best ? best.id : '';
 }
+// A refund (Скасування / Bolt-Uber-Uklon money back) belongs to the trip of the purchase it
+// returns money for — not to whatever trip happens to cover its date. The purchase is the
+// nearest earlier charge from the same merchant within 60 days that is at least as big.
+// An explicit choice (state.tripOf, e.g. 'none' from the ✕ in a trip) still wins.
+function isRefundTx(t){
+  return t.amount>0 && (CANCELLATION_KEYWORDS_GLOBAL.some(k=>t.desc.includes(k)) ||
+    REFUND_PRONE_MERCHANTS_GLOBAL.some(m=>t.desc.toLowerCase().includes(m)));
+}
+function merchantKey(desc){
+  return String(desc||'').replace(/^\s*(скасування|cancellation)[\s.:,-]*/i,'').trim().toLowerCase();
+}
+// charges grouped by merchant, built once per trips render
+function chargesByMerchant(rawTxs){
+  const m = {};
+  rawTxs.forEach(t=>{ if(t.amount<0) (m[merchantKey(t.desc)] = m[merchantKey(t.desc)]||[]).push(t); });
+  return m;
+}
+function refundTripId(r, charges){
+  const v = state.tripOf[txKey(r)];
+  if(v === 'none') return '';
+  if(v) return state.trips.some(x=>x.id===v) ? v : '';
+  const MAX_GAP = 60*24*60*60*1000;
+  let best = null;
+  (charges[merchantKey(r.desc)]||[]).forEach(c=>{
+    if(c.date>r.date || r.date-c.date>MAX_GAP || Math.abs(c.amount)+0.5 < r.amount) return;
+    if(!best || c.date>best.date) best = c;
+  });
+  return best ? tripIdFor(best) : '';
+}
 async function assignTrip(key, tripId){
   state.tripOf[key] = tripId || 'none';
   render();
@@ -3070,19 +3099,21 @@ function buildTripsPanel(all){
   if(state.trips.length===0){
     list.innerHTML = '<p class="ms-hint" style="margin:0">Поїздок ще немає — створи першу вище.</p>';
   }
+  const allRaw = accCache().map(mapRawItem); // unfiltered — the positive (refund) operations too, unlike getAllHistoricalExpenses()
+  const charges = chargesByMerchant(allRaw);
+  const refundTrip = new Map();
+  allRaw.forEach(t=>{ if(isRefundTx(t)) refundTrip.set(t, refundTripId(t, charges)); });
   state.trips.forEach(trip=>{
     const txs = all.filter(t=>tripIdFor(t)===trip.id);
     const expanded = !!state.expandedTrips?.[trip.id];
 
     let dateRangeStr = '';
     let dayCount = 0;
-    let tripMinD = null, tripMaxD = null; // exposed for refund-matching below
     const fmtD = d=>d.toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'});
     if(trip.dateFrom && trip.dateTo){
       // manually set — takes priority over any automatic guess
       const minD = new Date(trip.dateFrom+'T00:00:00');
       const maxD = new Date(trip.dateTo+'T23:59:59');
-      tripMinD = minD; tripMaxD = maxD;
       dateRangeStr = trip.dateFrom===trip.dateTo ? fmtD(minD) : `${fmtD(minD)} – ${fmtD(maxD)}`;
       dayCount = Math.round((maxD.getTime() - minD.getTime())/(24*60*60*1000)) + 1;
     }else{
@@ -3096,22 +3127,14 @@ function buildTripsPanel(all){
         const dates = dateSourceTxs.map(t=>t.date.getTime());
         const minD = new Date(Math.min(...dates));
         const maxD = new Date(Math.max(...dates));
-        tripMinD = new Date(minD.toDateString());
-        tripMaxD = new Date(maxD.toDateString()+' 23:59:59');
         dateRangeStr = minD.toDateString()===maxD.toDateString() ? fmtD(minD) : `${fmtD(minD)} – ${fmtD(maxD)}`;
         dayCount = Math.round((new Date(maxD.toDateString()).getTime() - new Date(minD.toDateString()).getTime())/(24*60*60*1000)) + 1;
       }
     }
 
-    // Refunds (Скасування/Bolt/Uber/Uklon) never get tagged to a trip directly (they're
-    // positive amounts, not shown in "Всі операції" at all) — find any that fall within
-    // this trip's date range and net them against the matching category, same logic as
-    // the Загальна картина netting above.
-    const allRaw = accCache().map(mapRawItem); // unfiltered — need the positive (refund) transactions too, unlike getAllHistoricalExpenses()
-    const tripRefunds = (tripMinD && tripMaxD) ? allRaw.filter(t=>
-      t.amount>0 && t.date>=tripMinD && t.date<=tripMaxD &&
-      (CANCELLATION_KEYWORDS_GLOBAL.some(k=>t.desc.includes(k)) || REFUND_PRONE_MERCHANTS_GLOBAL.some(m=>t.desc.toLowerCase().includes(m)))
-    ) : [];
+    // Refunds aren't in "Всі операції" (they're positive amounts), so they follow the trip of
+    // the purchase they return money for (refundTripId) and are netted against its category.
+    const tripRefunds = [...refundTrip].filter(([,tid])=>tid===trip.id).map(([r])=>r);
 
     // exact-category breakdown (not just the 4 broad groups) with refunds netted in,
     // so e.g. "такси" genuinely reflects what the rides cost after cancellations
@@ -3274,6 +3297,14 @@ function buildTripsPanel(all){
               const row = document.createElement('div');
               row.className = 'ms-trip-category-transaction is-refund';
               row.innerHTML = `<span>↩ ${dtStr(r.date)} · ${escapeHtml(r.desc)} (повернення)</span><strong>+${fmt(r.amount)} ${curSym()}</strong>`;
+              const removeBtn = document.createElement('button');
+              removeBtn.type = 'button';
+              removeBtn.className = 'ms-icon-btn';
+              removeBtn.textContent = '✕';
+              removeBtn.title = 'Прибрати це повернення з поїздки';
+              removeBtn.setAttribute('aria-label', 'Прибрати це повернення з поїздки');
+              removeBtn.addEventListener('click', e=>{ e.stopPropagation(); assignTrip(txKey(r), ''); });
+              row.appendChild(removeBtn);
               transactionList.appendChild(row);
             });
             categoryCard.appendChild(transactionList);

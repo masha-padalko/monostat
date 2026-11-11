@@ -403,6 +403,8 @@
   .ms-trip-category-hint{font-size:10px;color:var(--gold);}
   .ms-trip-category-transactions{width:100%;margin-top:8px;padding-top:6px;border-top:1px solid var(--line);}
   .ms-trip-category-transaction{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 8px;padding:6px 0;border-bottom:1px solid var(--line);font-size:10px;line-height:1.4;}
+  .ms-trip-category-transaction.is-refund{grid-template-columns:minmax(0,1fr) auto auto;align-items:center;}
+  .ms-trip-category-transaction.is-refund .ms-icon-btn{min-width:28px;min-height:28px;color:var(--muted);}
   .ms-trip-category-transaction:last-child{border-bottom:0;}
   .ms-trip-category-transaction>span{min-width:0;overflow-wrap:anywhere;color:var(--text);}
   .ms-trip-category-transaction>strong{font-family:var(--font-mono);font-size:10px;white-space:nowrap;color:var(--rust);}
