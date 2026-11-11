@@ -152,7 +152,7 @@ let state = {
   mainTab: (function(){ try{ const h=(location.hash||'').slice(1); return ['overview','history','trips','ops','data'].includes(h)?h:'overview'; }catch(e){ return 'overview'; } })(),
   dayExcluded: {...window.MonoStatDefaults.DEFAULT_DAY_EXCLUDED},     // txKey -> true if unchecked in "Зараз" (excluded from today/yesterday total)
   notExpense: {...window.MonoStatDefaults.DEFAULT_NOT_EXPENSE},       // txKey -> true — flagged as "not a real expense" (refunded/recharged, fund contribution, etc.) for "Чисті трати"
-  syncedRanges: [],      // [[fromUnix,toUnix],...] — periods already fetched/imported completely, so gap detection doesn't re-request them
+  syncedByAcc: {},       // accountId -> [[fromUnix,toUnix],...] — periods already fetched/imported completely FOR THAT CARD, so gap detection doesn't re-request them
   sync: {running:false, msg:'', done:0, total:0},
   refresh: {status:'idle', msg:'', code:''}, // background refresh after an instant start: idle | loading | ok | error
   lastAccountId: null,   // card chosen last time (ms_selectedaccount) — opened by default on the next visit
@@ -315,7 +315,8 @@ async function loadPersisted(){
   const nt = await storageGet('ms_notes'); if(nt) state.notes = {...state.notes, ...JSON.parse(nt)};
   const de = await storageGet('ms_dayexcluded'); if(de) state.dayExcluded = {...state.dayExcluded, ...JSON.parse(de)};
   const ne = await storageGet('ms_notexpense'); if(ne) state.notExpense = {...state.notExpense, ...JSON.parse(ne)};
-  const sr = await storageGet('ms_syncedranges'); if(sr) state.syncedRanges = JSON.parse(sr);
+  // (the older ms_syncedranges had no card in it — it is ignored, so each card's recent history gets re-checked once)
+  const sr = await storageGet('ms_syncedranges_acc'); if(sr) state.syncedByAcc = JSON.parse(sr) || {};
   const sh = await storageGet('ms_share'); if(sh) state.share = JSON.parse(sh);
   const ao = await storageGet('ms_amountoverride'); if(ao) state.amountOverride = JSON.parse(ao);
   const tco = await storageGet('ms_txcatoverride'); if(tco) state.txCategoryOverride = {...state.txCategoryOverride, ...JSON.parse(tco)};
@@ -382,12 +383,36 @@ async function persistTxCache(){
   if(state.txCache.length > 20000) state.txCache = state.txCache.slice(-20000);
   await storageSet('ms_txcache', JSON.stringify(state.txCache));
 }
-function mergeIntoCache(items){
+// The cache holds operations of every card she has ever loaded. `acc` on an item says which
+// card it belongs to — set whenever the bank returns that operation for that card. Items cached
+// before this existed have no `acc`: they stay visible until a statement proves otherwise
+// (`notAcc` lists the cards whose complete statement for that time did NOT contain the item).
+function accCache(){
+  const id = state.selectedAccount;
+  if(IS_DEMO || !id) return state.txCache;
+  return state.txCache.filter(it=>it.acc ? it.acc===id : !(it.notAcc && it.notAcc.includes(id)));
+}
+// `items` is the COMPLETE statement of card `acc` for [a,b]: any unlabelled cached operation
+// in that time that the bank didn't return is not this card's (another card, or a CSV twin).
+function reconcileRange(acc, a, b, items){
+  if(!acc) return;
+  const ids = new Set(items.map(i=>i.id));
+  let changed = false;
+  state.txCache.forEach(it=>{
+    if(it.acc || it.time<a || it.time>b || ids.has(it.id)) return;
+    if(it.notAcc && it.notAcc.includes(acc)) return;
+    it.notAcc = (it.notAcc||[]).concat([acc]);
+    changed = true;
+  });
+  if(changed) persistTxCache();
+}
+function mergeIntoCache(items, acc){
   const known = new Map(state.txCache.map(x=>[x.id,x]));
   let added = 0, updated = 0;
   items.forEach(it=>{
     const cached = known.get(it.id);
-    if(!cached){ state.txCache.push(it); known.set(it.id,it); added++; return; }
+    if(!cached){ if(acc) it.acc = acc; state.txCache.push(it); known.set(it.id,it); added++; return; }
+    if(acc && cached.acc !== acc){ cached.acc = acc; delete cached.notAcc; updated++; }
     // the comment can be added in the Monobank app after the operation was first cached
     if(it.comment && it.comment !== cached.comment){
       cached.comment = it.comment;
@@ -864,7 +889,7 @@ function daysUntilDateInclusive(endDateStr){
 // from the cache, instead of only ever knowing "right now". Best-effort: find the
 // earliest cached transaction on/after that date and back out its own amount.
 function reconstructBalanceAtStartOfDay(dateStr){
-  const sorted = [...state.txCache].sort((a,b)=>a.time-b.time);
+  const sorted = [...accCache()].sort((a,b)=>a.time-b.time);
   const dayStartUnix = Math.floor(new Date(dateStr+'T00:00:00').getTime()/1000);
   const firstOnOrAfter = sorted.find(it=>it.time >= dayStartUnix && it.balance!==undefined);
   if(firstOnOrAfter) return (firstOnOrAfter.balance - firstOnOrAfter.amount)/100;
@@ -948,15 +973,15 @@ function rememberSelectedAccount(){
     storageSet('ms_selectedaccount', state.selectedAccount);
   }
 }
-// Card switch right on the dashboard. The cache doesn't know which card an operation belongs
-// to, so the list is emptied until this card's own statement arrives.
+// Card switch right on the dashboard: shows this card's cached operations, then refreshes.
 function switchAccount(id){
   state.cardPickerOpen = false;
   if(id===state.selectedAccount || !state.accounts.some(a=>a.id===id)){ render(); return; }
   state.selectedAccount = id;
   rememberSelectedAccount();
   state.viewTab = 'current'; state.viewRange = null;
-  state.txs = [];
+  state.autoSyncDone = false; // this card's recent history gets its own check
+  refreshCurrentView();       // what is already known to be this card's — at once
   render();
   refreshInBackground({skipInfo:true});
 }
@@ -988,8 +1013,11 @@ async function refreshInBackground(opts){
   }
   if(stRes.status==='fulfilled'){
     const items = stRes.value;
-    mergeIntoCache(items);
-    if(items.length < 500) addSyncedRange(fromUnix, Math.min(toUnix, Math.floor(Date.now()/1000)));
+    mergeIntoCache(items, account);
+    if(items.length < 500){
+      reconcileRange(account, fromUnix, toUnix, items);
+      addSyncedRange(fromUnix, Math.min(toUnix, Math.floor(Date.now()/1000)), account);
+    }
     if(stillSame){
       if(items.length < 500) ingestTransactions(items);
       else refreshCurrentView(); // response capped at 500 — show the cache, autoSync fetches the rest
@@ -1118,9 +1146,13 @@ async function handleFetchStatement(){
   try{
     const fromUnix = Math.floor(new Date(state.from+'T00:00:00').getTime()/1000);
     const toUnix = Math.floor(new Date(state.to+'T23:59:59').getTime()/1000);
-    const items = await fetchStatement(state.token.trim(), state.selectedAccount, fromUnix, toUnix);
-    mergeIntoCache(items);
-    if(items.length < 500) addSyncedRange(fromUnix, Math.min(toUnix, Math.floor(Date.now()/1000)));
+    const account = state.selectedAccount;
+    const items = await fetchStatement(state.token.trim(), account, fromUnix, toUnix);
+    mergeIntoCache(items, account);
+    if(items.length < 500){
+      reconcileRange(account, fromUnix, toUnix, items);
+      addSyncedRange(fromUnix, Math.min(toUnix, Math.floor(Date.now()/1000)), account);
+    }
     ingestTransactions(items);
     state.viewTab = 'current';
     state.step = 'results';
@@ -1165,7 +1197,7 @@ function ingestTransactions(items){
 // loaded/shown) — used for "Подорожі", since a trip's purchases can span months and
 // she shouldn't have to keep the exact right period loaded just to tag them.
 function getAllHistoricalExpenses(){
-  const fromCache = state.txCache
+  const fromCache = accCache()
     .map(mapRawItem)
     .filter(t=>t.amount<0 && !state.loanKeys[txKey(t)])
     .map(t=>applyShare({...t, cat: categoryFor(t)}));
@@ -1190,7 +1222,7 @@ function getActiveRawTxs(){
   if(state.viewTab !== 'previous') return state.txs;
   const {start, end} = getPrevMonthRange();
   end.setHours(23,59,59,999);
-  return state.txCache
+  return accCache()
     .filter(it=>{ const d = it.time*1000; return d >= start.getTime() && d <= end.getTime(); })
     .map(mapRawItem);
 }
@@ -1410,7 +1442,7 @@ function rangePanel(){
   p.className='ms-panel';
   const {start, end} = getPrevMonthRange();
   const prevLabel = `${start.toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'})} – ${end.toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'})}`;
-  const prevCount = state.txCache.filter(it=>{const d=it.time*1000; return d>=start.getTime() && d<=end.setHours(23,59,59,999);}).length;
+  const prevCount = accCache().filter(it=>{const d=it.time*1000; return d>=start.getTime() && d<=end.setHours(23,59,59,999);}).length;
   const currNames = {980:'UAH',978:'EUR',840:'USD',985:'PLN',946:'RON'};
   const accLabel = a => `${escapeHtml(a.type||'')} · ${currNames[a.currency]||escapeHtml(String(a.currency))}`;
   const acc = state.accounts.find(a=>a.id===state.selectedAccount);
@@ -1472,7 +1504,7 @@ function buildTodayPanel(all){
   const source = [];
   const add = t => { const k = txKey(t); if(!seen.has(k)){ seen.add(k); source.push(t); } };
   if(inRange(todayKey) || inRange(yestKey)) all.filter(isTodayOrYest).forEach(add);
-  asExpense(state.txCache.map(mapRawItem).filter(isTodayOrYest)).forEach(add);
+  asExpense(accCache().map(mapRawItem).filter(isTodayOrYest)).forEach(add);
   asExpense((state.todayTxs || []).filter(isTodayOrYest)).forEach(add);
   const haveFresh = inRange(todayKey) || inRange(yestKey) || !!state.todayTxs || source.length>0;
 
@@ -2404,8 +2436,9 @@ function buildBalancePanel(){
   let cashbackPill = '';
   if(acc.cashbackType !== 'Miles'){
     const isWithdrawal = it => /виведення кешбеку|cashback withdrawal/i.test(it.description||'');
-    const lastW = state.txCache.filter(isWithdrawal).reduce((m,it)=>it.time>m?it.time:m, 0);
-    const accCb = state.txCache.filter(it=>it.time>lastW).reduce((sum,it)=>sum+(it.cashbackAmount||0)/100,0);
+    const cardCache = accCache();
+    const lastW = cardCache.filter(isWithdrawal).reduce((m,it)=>it.time>m?it.time:m, 0);
+    const accCb = cardCache.filter(it=>it.time>lastW).reduce((sum,it)=>sum+(it.cashbackAmount||0)/100,0);
     const periodCb = state.txs.reduce((sum,t)=>sum+(t.cashback||0),0);
     if(accCb > 0.004){
       const netCb = accCb * (1 - CASHBACK_TAX_RATE);
@@ -2648,9 +2681,11 @@ function mergeRanges(list){
   });
   return out;
 }
-function addSyncedRange(a, b){
-  state.syncedRanges = mergeRanges(state.syncedRanges.concat([[a,b]]));
-  storageSet('ms_syncedranges', JSON.stringify(state.syncedRanges));
+function addSyncedRange(a, b, acc){
+  acc = acc || state.selectedAccount;
+  if(!acc) return;
+  state.syncedByAcc[acc] = mergeRanges((state.syncedByAcc[acc]||[]).concat([[a,b]]));
+  storageSet('ms_syncedranges_acc', JSON.stringify(state.syncedByAcc));
 }
 function subtractRanges(intervals, covers){
   let res = intervals;
@@ -2671,8 +2706,18 @@ function subtractRanges(intervals, covers){
 function findGaps(){
   const now = Math.floor(Date.now()/1000);
   const horizon = now - 370*DAY_S;
-  const ts = [...new Set(state.txCache.map(x=>x.time))].sort((a,b)=>a-b);
+  // only operations the bank has confirmed for THIS card count as "have it"; old unlabelled
+  // ones don't, so the periods they sit in get re-requested and sorted out by card
+  const acc = state.selectedAccount;
+  const mine = accCache();
+  const ts = [...new Set(mine.filter(x=>IS_DEMO || x.acc===acc).map(x=>x.time))].sort((a,b)=>a-b);
   let cand = [];
+  const unlabelled = mine.filter(x=>!x.acc && x.time>horizon).map(x=>x.time);
+  if(unlabelled.length && !IS_DEMO){
+    const firstMine = ts.length ? ts[0] : now-30*DAY_S;
+    const oldest = Math.min(...unlabelled);
+    if(oldest < firstMine) cand.push({r:[oldest, firstMine-1], tail:false, relabel:true});
+  }
   for(let i=0;i<ts.length-1;i++){
     if(ts[i+1]-ts[i] > 4*DAY_S && ts[i+1] > horizon){
       cand.push({r:[Math.max(ts[i]+1, horizon), ts[i+1]-1], tail:false});
@@ -2682,8 +2727,8 @@ function findGaps(){
   cand.push({r:[last+1, now], tail:true});
   const out = [];
   cand.forEach(c=>{
-    subtractRanges([c.r], state.syncedRanges).forEach(([a,b])=>{
-      if(c.tail ? (b-a > 2*3600) : (b-a > 3*DAY_S)) out.push({from:a, to:b, tail:c.tail});
+    subtractRanges([c.r], state.syncedByAcc[acc]||[]).forEach(([a,b])=>{
+      if(c.tail ? (b-a > 2*3600) : (b-a > 3*DAY_S)) out.push({from:a, to:b, tail:c.tail, relabel:!!c.relabel});
     });
   });
   return out;
@@ -2705,7 +2750,7 @@ function refreshCurrentView(){
     if(state.to < todayStr()) state.to = todayStr();
     const a = Math.floor(new Date(state.from+'T00:00:00').getTime()/1000);
     const b = Math.floor(new Date(state.to+'T23:59:59').getTime()/1000);
-    ingestTransactions(state.txCache.filter(it=>it.time>=a && it.time<=b));
+    ingestTransactions(accCache().filter(it=>it.time>=a && it.time<=b));
   }
 }
 async function runSync(gaps){
@@ -2714,39 +2759,45 @@ async function runSync(gaps){
   const queue = [];
   gaps.forEach(g=>chunkRange(g.from, g.to).forEach(c=>queue.push(c)));
   if(!queue.length){ setSyncText('Пропусків немає ✓'); return; }
+  queue.sort((x,y)=>y[0]-x[0]); // newest first — recent history is what she looks at
+  const account = state.selectedAccount; // the whole run belongs to this card; switching cards stops it
+  const switched = ()=>state.selectedAccount!==account;
   state.sync = {running:true, msg:'', done:0, total:queue.length};
   try{
-    while(queue.length){
+    while(queue.length && !switched()){
       const [a,b] = queue.shift();
       let wait = 61000 - (Date.now()-state.lastApiCall); // Monobank: 1 request / 60 s per token
-      while(wait>0){
+      while(wait>0 && !switched()){
         setSyncText(`Чекаю ліміт Monobank: ${Math.ceil(wait/1000)} с · далі ${fmtUnixDay(a)}–${fmtUnixDay(b)} (${state.sync.done+1} з ${state.sync.total})`);
         await sleepMs(Math.min(wait, 1000));
         wait = 61000 - (Date.now()-state.lastApiCall);
       }
+      if(switched()) break;
       setSyncText(`Завантажую ${fmtUnixDay(a)}–${fmtUnixDay(b)} (${state.sync.done+1} з ${state.sync.total})…`);
       let items;
       try{
-        items = await fetchStatement(state.token.trim(), state.selectedAccount, a, b);
+        items = await fetchStatement(state.token.trim(), account, a, b);
       }catch(e){
         if(String(e.message).includes('429')){ queue.unshift([a,b]); continue; } // too early — wait the full minute again
         throw e;
       }
-      mergeIntoCache(items);
+      mergeIntoCache(items, account);
       if(items.length >= 500){
         // the API caps one response at 500 operations — continue from the oldest one received
         const oldest = Math.min(...items.map(i=>i.time));
         queue.unshift([a, oldest]); state.sync.total++;
       }else{
-        addSyncedRange(a, Math.min(b, Math.floor(Date.now()/1000)));
+        reconcileRange(account, a, b, items);
+        addSyncedRange(a, Math.min(b, Math.floor(Date.now()/1000)), account);
       }
       state.sync.done++;
     }
-    setSyncText('Готово ✓ Історію догружено.');
+    setSyncText(switched() ? '' : 'Готово ✓ Історію догружено.');
   }catch(e){
     setSyncText('Помилка синхронізації: '+(e.message||e)+'. Спробуй ще раз пізніше.');
   }
   state.sync.running = false;
+  if(switched()){ state.autoSyncDone = false; setTimeout(autoSync, 0); return; } // the new card gets its own run
   refreshCurrentView();
   render();
 }
@@ -2756,7 +2807,10 @@ function autoSync(){
   if(state.autoSyncDone || state.sync.running) return;
   state.autoSyncDone = true;
   const recent = Math.floor(Date.now()/1000) - 62*DAY_S;
-  const gaps = findGaps().filter(g=>g.tail || g.to >= recent);
+  // old operations not yet sorted by card are re-checked in full (once per card, newest first,
+  // one request a minute in the background); other old holes wait for the button
+  const gaps = findGaps().filter(g=>g.tail || g.relabel || g.to >= recent)
+    .map(g=>g.relabel ? g : {...g, from: Math.max(g.from, recent)});
   if(gaps.length) runSync(gaps);
 }
 
@@ -2826,15 +2880,15 @@ async function importCsvFiles(files){
       if(!items.length){ bad++; continue; }
       // already have it (loaded earlier via API)? match by minute + amount, counting repeats
       const have = new Map();
-      state.txCache.forEach(it=>{ const k = Math.floor(it.time/60)+'|'+it.amount; have.set(k,(have.get(k)||0)+1); });
+      accCache().forEach(it=>{ const k = Math.floor(it.time/60)+'|'+it.amount; have.set(k,(have.get(k)||0)+1); });
       const fresh = [];
       items.forEach(it=>{
         const k = Math.floor(it.time/60)+'|'+it.amount;
         if(have.get(k)>0){ have.set(k, have.get(k)-1); skipped++; } else fresh.push(it);
       });
-      added += mergeIntoCache(fresh);
+      added += mergeIntoCache(fresh, state.selectedAccount); // a CSV report is always one card's — the one open now
       const times = items.map(i=>i.time);
-      addSyncedRange(Math.min(...times), Math.max(...times)); // the report covers that whole span
+      addSyncedRange(Math.min(...times), Math.max(...times), state.selectedAccount); // the report covers that whole span
     }
     state.importMsg = `Імпорт CSV: додано ${added}, вже були ${skipped}${bad?`, порожніх файлів: ${bad}`:''}.`;
   }catch(e){
@@ -2857,7 +2911,7 @@ function historySearchRows(){
   const fromT = hs.from ? new Date(hs.from+'T00:00:00').getTime() : null;
   const toT = hs.to ? new Date(hs.to+'T23:59:59').getTime() : null;
   const out = [];
-  state.txCache.forEach(raw=>{
+  accCache().forEach(raw=>{
     const t = mapRawItem(raw);
     const ts = t.date.getTime();
     if(fromT!==null && ts<fromT) return;
@@ -2891,7 +2945,7 @@ function renderHistoryResults(panel){
   const sum = panel.querySelector('#hsSummary');
   const body = panel.querySelector('#hsBody');
   const more = panel.querySelector('#hsMore');
-  const total = state.txCache.length;
+  const total = accCache().length;
   if(!rows.length){
     sum.innerHTML = `Нічого не знайдено серед ${total} операцій в кеші.`;
   }else{
@@ -2922,7 +2976,7 @@ function buildHistorySearchPanel(){
   const hs = state.historySearch;
   const catOpts = sortedCats().map(c=>`<option value="${escapeHtml(c)}"${hs.cat===c?' selected':''}>${escapeHtml(c)}</option>`).join('');
   p.innerHTML = `<h2>Пошук по всій історії</h2>
-    <p class="ms-hint">Шукає серед усіх ${state.txCache.length} операцій у кеші (усі роки, що завантажені або імпортовані з CSV), незалежно від вибраного періоду. Кілька слів — шукає всі одразу: назва магазину, нотатка, коментар з банку, категорія або частина номера картки (наприклад, «5354»).</p>
+    <p class="ms-hint">Шукає серед усіх ${accCache().length} операцій цієї картки в кеші (усі роки, що завантажені або імпортовані з CSV), незалежно від вибраного періоду. Кілька слів — шукає всі одразу: назва магазину, нотатка, коментар з банку, категорія або частина номера картки (наприклад, «5354»).</p>
     <div class="ms-field" style="margin-bottom:10px"><input type="text" id="hsQ" placeholder="Наприклад: nike, кросівки, 5354, подарунок…" value="${escapeHtml(hs.q)}"></div>
     <div class="ms-row">
       <div class="ms-field"><label>Від дати</label><input type="date" id="hsFrom" value="${escapeHtml(hs.from)}"></div>
@@ -2970,7 +3024,7 @@ function buildDataTransferPanel(){
       <label class="ms-btn secondary" style="cursor:pointer" for="csvInput">Імпорт CSV з Monobank</label>
       <input type="file" id="csvInput" accept=".csv,text/csv" multiple style="display:none">
     </div>
-    <p class="ms-hint">CSV-виписку за будь-який період можна скачати в застосунку Monobank — вона вантажиться без обмежень API, дублі пропускаються.</p>
+    <p class="ms-hint">CSV-виписку за будь-який період можна скачати в застосунку Monobank — вона вантажиться без обмежень API, дублі пропускаються. Імпортуй виписку тієї картки, яка зараз обрана — операції запишуться саме на неї.</p>
     ${state.importMsg ? `<p class="ms-hint" style="color:var(--teal)">${escapeHtml(state.importMsg)}</p>` : ''}
     <div class="ms-row" style="margin-top:14px">
       <button class="ms-btn secondary" id="exportBtn">Вивантажити дані (.json)</button>
@@ -2984,10 +3038,12 @@ function buildDataTransferPanel(){
   });
   const box = p.querySelector('#syncBox');
   const gaps = findGaps();
-  const head = gaps.filter(g=>!g.tail);
+  const head = gaps.filter(g=>!g.tail && !g.relabel);
+  const relabelLeft = gaps.some(g=>g.relabel);
   const queueSize = gaps.reduce((n,g)=>n+chunkRange(g.from,g.to).length, 0);
   box.innerHTML = `
     <div class="ms-hint" id="syncStatus" style="margin:0 0 6px">${escapeHtml(state.sync.msg||'')}</div>
+    ${relabelLeft ? `<div class="ms-hint" style="margin:0 0 6px">Старі операції ще розкладаються по картках — це йде у фоні, поки сторінка відкрита (1 запит на хвилину).</div>` : ''}
     ${head.length ? `<div class="ms-hint" style="margin:0 0 6px">Немає даних за: ${head.slice(0,6).map(g=>fmtUnixDay(g.from)+'–'+fmtUnixDay(g.to)).join(', ')}${head.length>6?' …':''}</div>` : `<div class="ms-hint" style="margin:0 0 6px">Пропусків в історії (за останні 12 місяців) не знайдено ✓</div>`}
     ${queueSize ? `<button class="ms-btn secondary" id="syncBtn" ${state.sync.running?'disabled':''}>${state.sync.running?'Триває…':`Догрузити пропуски (${queueSize} запит., ≈ ${queueSize} хв)`}</button>` : ''}`;
   const syncBtn = box.querySelector('#syncBtn');
@@ -3051,7 +3107,7 @@ function buildTripsPanel(all){
     // positive amounts, not shown in "Всі операції" at all) — find any that fall within
     // this trip's date range and net them against the matching category, same logic as
     // the Загальна картина netting above.
-    const allRaw = state.txCache.map(mapRawItem); // unfiltered — need the positive (refund) transactions too, unlike getAllHistoricalExpenses()
+    const allRaw = accCache().map(mapRawItem); // unfiltered — need the positive (refund) transactions too, unlike getAllHistoricalExpenses()
     const tripRefunds = (tripMinD && tripMaxD) ? allRaw.filter(t=>
       t.amount>0 && t.date>=tripMinD && t.date<=tripMaxD &&
       (CANCELLATION_KEYWORDS_GLOBAL.some(k=>t.desc.includes(k)) || REFUND_PRONE_MERCHANTS_GLOBAL.some(m=>t.desc.toLowerCase().includes(m)))
