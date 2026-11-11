@@ -155,6 +155,8 @@ let state = {
   syncedRanges: [],      // [[fromUnix,toUnix],...] — periods already fetched/imported completely, so gap detection doesn't re-request them
   sync: {running:false, msg:'', done:0, total:0},
   refresh: {status:'idle', msg:'', code:''}, // background refresh after an instant start: idle | loading | ok | error
+  lastAccountId: null,   // card chosen last time (ms_selectedaccount) — opened by default on the next visit
+  cardPickerOpen: false, // card list unfolded on the dashboard
   importMsg: '',
   lastApiCall: 0,
   autoSyncDone: false,
@@ -331,6 +333,7 @@ async function loadPersisted(){
   const rh = await storageGet('ms_recurring_hidden'); if(rh){ try{ state.recurringHidden = JSON.parse(rh)||[]; }catch(e){} }
   const tr = await storageGet('ms_trips'); if(tr) state.trips = JSON.parse(tr);
   const to_ = await storageGet('ms_tripof'); if(to_) state.tripOf = JSON.parse(to_);
+  const sa = await storageGet('ms_selectedaccount'); if(sa) state.lastAccountId = sa;
   const cc = await storageGet('ms_customcats');
   if(cc){
     const stored = JSON.parse(cc);
@@ -921,19 +924,50 @@ function clearAccountsSnapshot(){
 function autoStart(){
   if(!state.token.trim() || !state.rememberToken){ render(); return; }
   const snap = loadAccountsSnapshot();
-  if(!snap){ handleConnect(); return; } // first visit with this token: connect by itself, she only picks the card
+  if(!snap){ handleConnect(); return; } // new browser: one request for the card list, then straight to the dashboard
   state.accounts = snap.accounts;
   state.selectedAccount = snap.selectedAccount;
+  openDashboard();
+}
+// Dashboard for the selected card: current period from the cache at once, fresh data in the background.
+function openDashboard(info){
   state.viewTab = 'current';
   state.step = 'results';
-  refreshCurrentView(); // current period straight from the cache — no request, no waiting
+  state.cardPickerOpen = false;
+  refreshCurrentView(); // no request, no waiting
   render();
-  refreshInBackground();
+  refreshInBackground({info});
+}
+// The last chosen card is remembered in the account (so it follows her to another device)
+// and in this browser's snapshot (so the next visit needs no request before showing anything).
+function rememberSelectedAccount(){
+  if(!state.selectedAccount) return;
+  saveAccountsSnapshot();
+  if(state.lastAccountId !== state.selectedAccount){
+    state.lastAccountId = state.selectedAccount;
+    storageSet('ms_selectedaccount', state.selectedAccount);
+  }
+}
+// Card switch right on the dashboard. The cache doesn't know which card an operation belongs
+// to, so the list is emptied until this card's own statement arrives.
+function switchAccount(id){
+  state.cardPickerOpen = false;
+  if(id===state.selectedAccount || !state.accounts.some(a=>a.id===id)){ render(); return; }
+  state.selectedAccount = id;
+  rememberSelectedAccount();
+  state.viewTab = 'current'; state.viewRange = null;
+  state.txs = [];
+  render();
+  refreshInBackground({skipInfo:true});
 }
 
 // Fresh balance + current-period statement, without blocking what is already on screen.
-async function refreshInBackground(){
-  if(state.refresh.status==='loading') return;
+let refreshRun = 0;
+async function refreshInBackground(opts){
+  const info = opts && opts.info;       // card list already fetched a moment ago — don't ask twice
+  const skipInfo = !!(opts && opts.skipInfo); // card switch: the list is on screen, and client-info has its own once-a-minute limit
+  const retried = !!(opts && opts.retried);
+  const run = ++refreshRun;             // a newer run (card switched meanwhile) makes this one stale
   const token = state.token.trim();
   const account = state.selectedAccount;
   const from = state.from, to = state.to;
@@ -942,12 +976,13 @@ async function refreshInBackground(){
   const fromUnix = Math.floor(new Date(from+'T00:00:00').getTime()/1000);
   const toUnix = Math.floor(new Date(to+'T23:59:59').getTime()/1000);
   const [infoRes, stRes] = await Promise.allSettled([
-    fetchClientInfo(token),
+    info || skipInfo ? Promise.resolve(info||null) : fetchClientInfo(token),
     fetchStatement(token, account, fromUnix, toUnix)
   ]);
+  if(run !== refreshRun) return;
   // she may have changed the card/period (or signed out) while the requests were running
   const stillSame = state.step==='results' && state.selectedAccount===account && state.from===from && state.to===to && !!authUserId;
-  if(infoRes.status==='fulfilled'){
+  if(infoRes.status==='fulfilled' && infoRes.value){
     const accounts = mapAccounts(infoRes.value);
     if(stillSame && accounts.some(a=>a.id===account)){ state.accounts = accounts; saveAccountsSnapshot(); }
   }
@@ -968,13 +1003,18 @@ async function refreshInBackground(){
     const m = String(failed.reason && failed.reason.message || failed.reason);
     const code = m.includes('403') ? 'token' : m.includes('429') ? 'limit' : 'network';
     const msg = code==='token' ? 'Monobank не прийняв токен — показую збережені дані.'
-      : code==='limit' ? 'Monobank дозволяє оновлення раз на хвилину — показую збережені дані.'
+      : code==='limit' ? (retried ? 'Monobank дозволяє оновлення раз на хвилину — спробуй трохи пізніше.' : 'Monobank дозволяє оновлення раз на хвилину — оновлю сама за хвилину.')
       : 'Не вдалося оновити (немає зв\'язку?) — показую збережені дані.';
     state.refresh = {status:'error', msg, code};
   }
   if(!stillSame) return;
   render();
-  if(state.refresh.code!=='token') setTimeout(autoSync, 0); // fills the tail / recent holes, waiting out the rate limit itself
+  if(state.refresh.code==='limit'){
+    // asked too soon (page reopened or card switched within a minute) — one automatic retry
+    if(!retried) setTimeout(()=>{ if(run===refreshRun && state.step==='results') refreshInBackground({retried:true}); }, 61000);
+  }else if(state.refresh.code!=='token'){
+    setTimeout(autoSync, 0); // fills the tail / recent holes, waiting out the rate limit itself
+  }
 }
 function refreshNoteHtml(){
   const r = state.refresh;
@@ -984,7 +1024,7 @@ function refreshNoteHtml(){
   return '';
 }
 function bindRefreshNote(el){
-  el.querySelector('#refreshRetryBtn')?.addEventListener('click', refreshInBackground);
+  el.querySelector('#refreshRetryBtn')?.addEventListener('click', ()=>refreshInBackground());
   el.querySelector('#refreshTokenBtn')?.addEventListener('click', ()=>{ state.step='connect'; render(); });
 }
 // targeted update — a full render() here would reset whatever she is doing on the page
@@ -1007,6 +1047,19 @@ async function handleConnect(){
     state.selectedAccount = (preferred || state.accounts[0])?.id || null;
     state.step = 'accounts';
     if(state.rememberToken) await storageSet('ms_token', state.token.trim());
+    // The card she used last time (or the only one there is) opens right away — the card
+    // list is on the dashboard itself. Only a first-ever choice between several cards is asked.
+    const last = state.accounts.find(a=>a.id===state.lastAccountId);
+    const known = last || (state.accounts.length===1 ? state.accounts[0] : null);
+    if(known){
+      state.selectedAccount = known.id;
+      if(!state.from) state.from = defaultPeriodStart();
+      if(!state.to) state.to = todayStr();
+      rememberSelectedAccount();
+      state.loading = false;
+      openDashboard(info);
+      return;
+    }
   }catch(e){
     state.error = 'connect';
   }
@@ -1072,7 +1125,7 @@ async function handleFetchStatement(){
     state.viewTab = 'current';
     state.step = 'results';
     state.refresh = {status:'ok', msg:'Оновлено о '+new Date().toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'}), code:''};
-    saveAccountsSnapshot(); // next visit opens straight on the dashboard with this card
+    rememberSelectedAccount(); // next visit opens straight on the dashboard with this card
     await updateJarAccumulation(); // finish this BEFORE the first render of results, no stale flash
   }catch(e){
     state.error = 'statement';
@@ -1358,7 +1411,17 @@ function rangePanel(){
   const {start, end} = getPrevMonthRange();
   const prevLabel = `${start.toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'})} – ${end.toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'})}`;
   const prevCount = state.txCache.filter(it=>{const d=it.time*1000; return d>=start.getTime() && d<=end.setHours(23,59,59,999);}).length;
-  p.innerHTML = `
+  const currNames = {980:'UAH',978:'EUR',840:'USD',985:'PLN',946:'RON'};
+  const accLabel = a => `${escapeHtml(a.type||'')} · ${currNames[a.currency]||escapeHtml(String(a.currency))}`;
+  const acc = state.accounts.find(a=>a.id===state.selectedAccount);
+  const canSwitch = !IS_DEMO && state.accounts.length>1;
+  const cardLine = !acc || IS_DEMO ? '' : `
+    <div class="ms-row" style="align-items:center;flex-wrap:wrap;margin-bottom:8px">
+      <div style="flex:1;font-size:13px;color:var(--muted)">Картка: <b style="color:var(--text)">${accLabel(acc)}</b> <span style="font-family:var(--font-mono)">${escapeHtml(acc.pan||'')}</span></div>
+      ${canSwitch ? `<button class="ms-btn secondary" id="cardPickerBtn" aria-expanded="${state.cardPickerOpen}">Інша картка ${state.cardPickerOpen?'▴':'▾'}</button>` : ''}
+    </div>
+    ${canSwitch && state.cardPickerOpen ? '<div class="ms-accounts" id="cardPickerList" style="margin-bottom:12px"></div>' : ''}`;
+  p.innerHTML = `${cardLine}
     <div class="ms-row" style="align-items:center;flex-wrap:wrap">
       <div style="flex:1;font-size:13px;color:var(--muted)">Період: <b style="color:var(--text)">${state.from} → ${state.to}</b></div>
       ${IS_DEMO ? '' : '<button class="ms-btn secondary" id="backBtn">Змінити період</button>'}
@@ -1370,6 +1433,18 @@ function rangePanel(){
     </div>
   `;
   p.querySelector('#backBtn')?.addEventListener('click', ()=>{state.step='accounts'; render();});
+  p.querySelector('#cardPickerBtn')?.addEventListener('click', ()=>{state.cardPickerOpen=!state.cardPickerOpen; render();});
+  const pickerList = p.querySelector('#cardPickerList');
+  if(pickerList) state.accounts.forEach(a=>{
+    const row = document.createElement('div');
+    row.className = 'ms-account'+(a.id===state.selectedAccount?' selected':'');
+    row.tabIndex = 0;
+    row.setAttribute('role','button');
+    row.innerHTML = `<span>${accLabel(a)}</span><span class="pan">${escapeHtml(a.pan||'')}</span>`;
+    row.addEventListener('click', ()=>switchAccount(a.id));
+    row.addEventListener('keydown', e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); switchAccount(a.id); } });
+    pickerList.appendChild(row);
+  });
   bindRefreshNote(p);
   p.querySelector('#tabCurrent').addEventListener('click', ()=>{state.viewTab='current'; state.viewRange=null; render();});
   p.querySelector('#tabPrevious').addEventListener('click', ()=>{state.viewTab='previous'; state.viewRange=null; render();});
