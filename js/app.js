@@ -1272,6 +1272,9 @@ function parseManualJson(){
 function render(){
   const app = document.getElementById('app');
   app.innerHTML = '';
+  const navSlot = document.getElementById('ms-nav-slot');
+  if(navSlot) navSlot.innerHTML = '';     // resultsPanel() puts the tabs back when the dashboard is shown
+  delete document.body.dataset.tab;
   if(IS_DEMO){
     if(state.step!=='results') return;
     const banner = document.createElement('div');
@@ -1468,7 +1471,7 @@ function accountsPanel(){
 
 function rangePanel(){
   const p = document.createElement('div');
-  p.className='ms-panel';
+  p.className='ms-rangebar';
   const {start, end} = getPrevMonthRange();
   const prevLabel = `${start.toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'})} – ${end.toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'})}`;
   const prevCount = accCache().filter(it=>{const d=it.time*1000; return d>=start.getTime() && d<=end.setHours(23,59,59,999);}).length;
@@ -1489,8 +1492,8 @@ function rangePanel(){
     </div>
     ${IS_DEMO ? '' : `<div class="ms-hint" id="refreshNote" style="margin:6px 0 0">${refreshNoteHtml()}</div>`}
     <div class="ms-row" style="margin-top:10px;gap:8px">
-      <button class="ms-btn${state.viewTab==='current'?'':' secondary'}" id="tabCurrent" style="flex:1">Поточний період</button>
-      <button class="ms-btn${state.viewTab==='previous'?'':' secondary'}" id="tabPrevious" style="flex:1">${state.viewRange?'Цикл':'Попередній місяць'} (${prevLabel})${prevCount?' · '+prevCount+' оп. в кеші':' · немає в кеші'}</button>
+      <button class="ms-btn${state.viewTab==='current'?'':' secondary'}" id="tabCurrent">Поточний період</button>
+      <button class="ms-btn${state.viewTab==='previous'?'':' secondary'}" id="tabPrevious">${state.viewRange?'Цикл':'Попередній місяць'} (${prevLabel})${prevCount?' · '+prevCount+' оп. в кеші':' · немає в кеші'}</button>
     </div>
   `;
   p.querySelector('#backBtn')?.addEventListener('click', ()=>{state.step='accounts'; render();});
@@ -2137,32 +2140,39 @@ function resultsPanel(){
     });
     bar.appendChild(b);
   });
-  wrap.appendChild(bar);
+  const headerNav = document.getElementById('ms-nav-slot');
+  if(headerNav) headerNav.appendChild(bar); else wrap.appendChild(bar);
+  document.body.dataset.tab = tab;
 
   if(tab==='overview'){
     gap(panelRange); wrap.appendChild(panelRange);
 
-    // one row: black card · how much can be spent per day · "Зараз"
-    const nowRow = document.createElement('div');
-    nowRow.className = 'ms-grid3 ms-row-now';
-    nowRow.appendChild(panelBalance);
-    nowRow.appendChild(panelDailyBudget);
-    nowRow.appendChild(panelToday);
-    gap(nowRow); wrap.appendChild(nowRow);
-
+    // left: bank card + "how much per day" side by side, "Загальна картина" under them;
+    // right: "Зараз" (today/yesterday) with "Регулярні платежі" under it.
+    // On a phone it's one column: card, per day, Зараз, Загальна картина, Регулярні платежі.
     const panelRecurring = buildRecurringPaymentsPanel();
-    const topRow = document.createElement('div');
-    topRow.className = 'ms-grid';
-    topRow.appendChild(panel1);
-    if(!panelRecurring.hidden){
-      const stack = document.createElement('div');
-      stack.className = 'ms-dashboard-stack';
-      stack.appendChild(panelRecurring);
-      topRow.appendChild(stack);
-    }
-    gap(topRow); wrap.appendChild(topRow);
-
-    wrap.appendChild(gap(buildMonthlyBarChart()));
+    const overview = document.createElement('div');
+    overview.className = 'ms-overview';
+    const main = document.createElement('div');
+    main.className = 'ms-ov-main';
+    const cardRow = document.createElement('div');
+    cardRow.className = 'ms-ov-cardrow';
+    panelBalance.classList.add('ms-ov-card');
+    panelDailyBudget.classList.add('ms-ov-budget');
+    panel1.classList.add('ms-ov-general');
+    panelToday.classList.add('ms-ov-today');
+    panelRecurring.classList.add('ms-ov-recurring');
+    cardRow.appendChild(panelBalance);
+    cardRow.appendChild(panelDailyBudget);
+    main.appendChild(cardRow);
+    main.appendChild(panel1);
+    const side = document.createElement('div');
+    side.className = 'ms-ov-side';
+    side.appendChild(panelToday);
+    if(!panelRecurring.hidden) side.appendChild(panelRecurring);
+    overview.appendChild(main);
+    overview.appendChild(side);
+    wrap.appendChild(overview);
   }else if(tab==='history'){
     wrap.appendChild(gap(buildHistorySearchPanel()));
   }else if(tab==='trips'){
@@ -2206,11 +2216,6 @@ function collapseHints(root){
     h2.appendChild(btn);
   });
 }
-
-// Groups every cached expense by calendar month and renders a simple CSS bar chart —
-// last 6 months, most recent on the right, so she can see at a glance whether this
-// month is running higher or lower than her usual pace. No charting library needed,
-// consistent with the rest of the app's plain-CSS visuals.
 
 // Known recurring subscriptions/bills, detected from the cache by keyword. Since a
 // real background push notification needs a server (this app has none — it's a
@@ -2338,75 +2343,6 @@ function buildRecurringPaymentsPanel(){
   return p;
 }
 
-function buildMonthlyBarChart(){
-  const p = document.createElement('div');
-  p.className = 'ms-panel';
-
-  const history = getAllHistoricalExpenses();
-
-  // build 7 cycle-boundary dates (10th of each month), then 6 cycles between them —
-  // matches her actual pay cycle (10-to-10), not the calendar month. boundaries[6] is
-  // the NEXT 10th (end of the current cycle), boundaries[0] is 6 cycles back.
-  const currentCycleStart = new Date(defaultPeriodStart()+'T00:00:00');
-  const boundaries = [];
-  for(let k=0;k<=6;k++){
-    const d = new Date(currentCycleStart.getFullYear(), currentCycleStart.getMonth()-5+k, 10);
-    boundaries.push(d);
-  }
-  const cycles = [];
-  for(let i=0;i<6;i++){
-    const start = boundaries[i];
-    const end = boundaries[i+1]; // exclusive
-    const sum = history
-      .filter(t=>t.date>=start && t.date<end)
-      .reduce((s,t)=>s+Math.abs(t.amount),0);
-    cycles.push({
-      label: start.toLocaleDateString('uk-UA',{month:'short'}),
-      sum,
-      start, end,
-      isCurrent: i===5
-    });
-  }
-  const maxSum = Math.max(1, ...cycles.map(m=>m.sum));
-
-  p.innerHTML = `
-    <h2>Витрати за місяцями</h2>
-    <p class="ms-hint">Останні 6 платіжних циклів (10-те до 10-го, як і всюди в застосунку) — щоб порівнювати темп саме між зарплатами, а не за календарем. Натисни на стовпчик — відкриється повна статистика за цей цикл.</p>
-    <div class="ms-bars"></div>
-  `;
-  const barsWrap = p.querySelector('.ms-bars');
-  cycles.forEach(m=>{
-    const col = document.createElement('div');
-    col.className = 'ms-bar-col';
-    const heightPct = Math.max(4, (m.sum/maxSum)*100);
-    col.innerHTML = `
-      <div class="ms-bar-amt">${m.sum ? fmt(m.sum) : ''}</div>
-      <div class="ms-bar-track"><div class="ms-bar-fill${m.isCurrent?' ms-bar-fill-current':''}" style="height:${heightPct}%"></div></div>
-      <div class="ms-bar-label${m.isCurrent?' ms-bar-label-current':''}">${m.label}</div>
-    `;
-    // click → open full stats for this cycle (from local cache only, no API call)
-    col.classList.add('ms-bar-clickable');
-    col.tabIndex = 0;
-    col.setAttribute('role','button');
-    const rangeTxt = `${m.start.toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'})} – ${new Date(m.end.getTime()-86400000).toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'})}`;
-    col.setAttribute('aria-label', `Відкрити статистику за цикл ${rangeTxt}`);
-    col.title = `Відкрити статистику: ${rangeTxt}`;
-    const open = ()=>{
-      if(m.isCurrent){ state.viewTab='current'; state.viewRange=null; }
-      else{
-        const endIncl = new Date(m.end.getFullYear(), m.end.getMonth(), m.end.getDate()-1);
-        state.viewTab='previous';
-        state.viewRange = {start:new Date(m.start), end:endIncl};
-      }
-      render();
-      window.scrollTo({top:0, behavior:'smooth'});
-    };
-    col.addEventListener('click', open);
-    col.addEventListener('keydown', e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); open(); } });
-    barsWrap.appendChild(col);
-  });
-  return p;
-}
 function buildCleanExpensesPanel(all, grossTotal, periodDays){
   const p = document.createElement('div');
   p.className = 'ms-panel';

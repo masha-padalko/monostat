@@ -41,7 +41,6 @@
   }
   .ms-tabbar{display:flex;gap:6px;overflow-x:auto;margin:0 0 16px;padding-bottom:0;border-bottom:none;scrollbar-width:thin;}
   .ms-tab{flex:0 0 auto;display:inline-flex;align-items:center;gap:7px;background:rgba(0,0,0,.08);border:1px solid rgba(0,0,0,.18);border-radius:8px;color:#1a1308!important;opacity:1!important;font:inherit;font-size:14px;padding:9px 15px;cursor:pointer;white-space:nowrap;transition:background .15s,border-color .15s;}
-  .ms-row-now{grid-template-columns:minmax(360px,1.15fr) minmax(0,.75fr) minmax(0,1.6fr);}
   .ms-tab:hover{background:rgba(0,0,0,.14);color:#1a1308!important;border-color:rgba(0,0,0,.28);}
   .ms-tab.active{background:var(--gold, #c9a55c);border-color:var(--gold, #c9a55c);color:#1a1308!important;font-weight:600;opacity:1;}
   .ms-tab-ic{opacity:1;}
@@ -52,8 +51,6 @@
   .ms-demo-banner{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;background:#F5EAD4;border:1px solid var(--gold);border-radius:10px;padding:12px 16px;margin-bottom:14px;font-size:13px;}
   .ms-demo-banner .ms-btn{text-decoration:none;white-space:nowrap;}
   @media (max-width:680px){.ms-tab{padding:9px 11px;font-size:13px;}.ms-tab-ic{display:none;}}
-  @media (max-width:1100px) and (min-width:681px){.ms-row-now{grid-template-columns:1fr 1.4fr;}.ms-row-now > :first-child{grid-column:1 / -1;}}
-  @media (max-width:680px){.ms-row-now{grid-template-columns:1fr;}}
   .ms-eyebrow{
     font-family:var(--font-mono);
     font-size:11px;
@@ -77,11 +74,10 @@
   }
   .ms-panel{
     background:var(--panel);
-    border:1px solid var(--line);
-    border-radius:14px;
-    padding:18px;
+    border:0;
+    border-radius:18px;
+    padding:20px;
     margin-bottom:14px;
-    box-shadow:0 1px 2px rgba(74,54,35,.04);
   }
   .ms-panel h2{
     font-family:var(--font-display);
@@ -358,17 +354,6 @@
   .ms-bc-eur{font-family:var(--font-mono);font-size:13px;color:rgba(255,255,255,0.55);margin:0;}
   .ms-bc-sub{font-size:12px;color:rgba(255,255,255,0.5);margin:6px 0 0;font-family:var(--font-mono);letter-spacing:.06em;}
 
-  .ms-bars{display:flex;align-items:flex-end;gap:10px;height:140px;margin-top:14px;padding:0 4px;}
-  .ms-bar-col{flex:1;display:flex;flex-direction:column;align-items:center;height:100%;}
-  .ms-bar-amt{font-size:10.5px;color:var(--muted);font-family:var(--font-mono);margin-bottom:4px;white-space:nowrap;}
-  .ms-bar-track{flex:1;width:100%;display:flex;align-items:flex-end;}
-  .ms-bar-fill{
-    width:100%;background:var(--panel-hi);border-radius:6px 6px 2px 2px;
-    box-shadow:inset 0 1px 1px rgba(255,255,255,0.5);transition:height .3s;
-  }
-  .ms-bar-fill-current{background:var(--gold);}
-  .ms-bar-label{font-size:11px;color:var(--muted);margin-top:6px;text-transform:capitalize;}
-  .ms-bar-label-current{color:var(--gold);font-weight:600;}
 
   .ms-section-divider{
     height:1px;background:linear-gradient(90deg, transparent, var(--line) 20%, var(--line) 80%, transparent);
@@ -446,21 +431,14 @@
   select option{background:#FFFCF5;color:#4A3623;}
 
 
-.ms-bar-clickable{cursor:pointer;border-radius:8px;transition:background .15s}
-.ms-bar-clickable:hover,.ms-bar-clickable:focus-visible{background:var(--panel-hi);outline:none}
-.ms-bar-clickable:focus-visible{box-shadow:0 0 0 2px var(--gold)}
 
 .ms-share-real{font-size:10.5px;color:var(--muted);font-family:var(--font-mono);white-space:nowrap}
 .ms-share-sel{display:block;margin:2px 0 0 auto;font-size:11px;padding:1px 2px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--muted);cursor:pointer}
 .ms-share-sel:hover,.ms-share-sel:focus{border-color:var(--gold);background:var(--panel)}
 
   /* ---------- Minimal look (results view) ---------- */
-  /* (3) blocks without frames: separated by space and a hairline; only the bank card
-     and "Скільки можна витрачати на день" (.ms-card) stay as cards */
-  .ms-results .ms-panel{background:transparent;border:0;box-shadow:none;border-radius:0;
-    padding:20px 2px 6px;border-top:1px solid var(--line);}
-  .ms-results .ms-panel.ms-card{background:var(--panel);border:1px solid var(--line);border-radius:16px;
-    padding:20px;box-shadow:0 1px 2px rgba(74,54,35,.04);}
+  /* (3) every block: own background and rounded corners, no frame */
+  .ms-results .ms-panel{background:var(--panel);border:0;box-shadow:none;border-radius:18px;padding:20px;}
   .ms-results .ms-today-card,.ms-results .ms-today-card.highlight{background:var(--panel-hi);border:0;box-shadow:none;}
   .ms-results .ms-panel h2{display:flex;align-items:center;gap:8px;}
 
@@ -508,3 +486,63 @@
   .ms-root select:not([multiple]):hover{border-color:var(--gold);}
   .ms-tab:disabled{opacity:.45 !important;cursor:not-allowed;}
   .ms-tab:disabled:hover{background:rgba(0,0,0,.08);border-color:rgba(0,0,0,.18);}
+
+  /* ---------- Layout: header · slogan · overview grid ---------- */
+  .ms-topbar{display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"logo nav right";
+    align-items:center;gap:16px;margin-bottom:28px;}
+  .ms-logo{grid-area:logo;display:inline-flex;align-items:center;gap:10px;text-decoration:none;color:var(--text);
+    font-family:var(--font-display);font-size:24px;font-weight:600;letter-spacing:-.01em;}
+  .ms-logo-mark{width:26px;height:26px;border-radius:8px 3px 8px 3px;background:linear-gradient(135deg,var(--gold),#D9B36E);
+    box-shadow:6px -4px 0 -1px #E8CFA0;}
+  .ms-nav{grid-area:nav;min-width:0;display:flex;justify-content:center;}
+  .ms-nav .ms-tabbar{margin:0;gap:4px;max-width:100%;scrollbar-width:none;}
+  .ms-nav .ms-tabbar::-webkit-scrollbar{display:none;}
+  .ms-nav .ms-tab{background:transparent;border:0;border-radius:999px;padding:9px 16px;font-size:14px;}
+  .ms-nav .ms-tab:hover{background:var(--panel-hi);}
+  .ms-nav .ms-tab.active{background:#EFDDB8;font-weight:600;}
+  .ms-nav .ms-tab-ic{display:none;}
+  .ms-topbar > .ms-header-right{grid-area:right;justify-self:end;}
+  .ms-header-link{font-size:13px;color:var(--gold);text-decoration:none;white-space:nowrap;}
+  .ms-header-link:hover{text-decoration:underline;}
+
+  .ms-hero-head{margin:0 0 18px;}
+  .ms-hero-head .ms-h1{font-size:clamp(30px,4.2vw,52px);line-height:1.05;letter-spacing:-.02em;font-weight:500;margin:0;}
+  body[data-tab]:not([data-tab="overview"]) .ms-hero-head{display:none;}
+
+  /* period + card line right under the slogan — plain text, not a block */
+  .ms-rangebar{margin:0 0 18px;}
+  .ms-rangebar .ms-row{gap:8px 12px;}
+  .ms-rangebar .ms-btn{padding:8px 14px;font-size:13px;}
+  .ms-rangebar .ms-hint{font-size:12px;color:var(--muted);line-height:1.5;}
+
+  .ms-overview{display:grid;grid-template-columns:minmax(0,2fr) minmax(300px,1fr);gap:14px;align-items:start;}
+  .ms-ov-main,.ms-ov-side{display:flex;flex-direction:column;gap:14px;min-width:0;}
+  .ms-ov-cardrow{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:14px;align-items:stretch;}
+  .ms-ov-cardrow > *{min-width:0;}
+  .ms-overview .ms-panel{margin-bottom:0;}
+  .ms-ov-card .ms-balance-card{max-width:none;height:100%;}
+  /* "Загальна картина" in the wide column: donut on the left, categories on the right */
+  .ms-ov-general .ms-hero{flex-direction:row;align-items:flex-start;gap:28px;}
+  .ms-ov-general .ms-legend{flex:1;min-width:0;}
+  /* "Регулярні платежі" in the narrow column: name on one line, dates under it */
+  .ms-ov-recurring .ms-today-cat-row{flex-wrap:wrap;row-gap:2px;}
+  .ms-ov-recurring .ms-rec-name{flex:1 1 100%;}
+  .ms-ov-recurring .ms-rec-meta{font-size:11px;}
+
+  @media (max-width:1000px){
+    /* one column; the two column wrappers dissolve so the blocks can be ordered */
+    .ms-overview{display:flex;flex-direction:column;align-items:stretch;}
+    .ms-ov-general .ms-hero{flex-direction:column;align-items:center;}
+    .ms-ov-main,.ms-ov-side,.ms-ov-cardrow{display:contents;}
+    .ms-ov-card{order:1;} .ms-ov-budget{order:2;} .ms-ov-today{order:3;} .ms-ov-general{order:4;} .ms-ov-recurring{order:5;}
+    .ms-ov-card .ms-balance-card{max-width:440px;height:auto;aspect-ratio:auto;}
+  }
+  @media (max-width:760px){
+    .ms-topbar{grid-template-columns:auto minmax(0,1fr);grid-template-areas:"logo right" "nav nav";gap:12px;margin-bottom:20px;}
+    .ms-nav{justify-content:flex-start;}
+    .ms-nav .ms-tabbar{overflow-x:auto;}
+    .ms-header-email,.ms-topbar .ms-avatar{display:none;}
+    .ms-logo{font-size:21px;gap:8px;}
+    .ms-logo-mark{width:22px;height:22px;}
+    .ms-hero-head{margin-bottom:14px;}
+  }
