@@ -506,7 +506,8 @@
   .ms-header-link:hover{text-decoration:underline;}
 
   .ms-hero-head{margin:0 0 18px;}
-  .ms-hero-head .ms-h1{font-size:clamp(30px,4.2vw,52px);line-height:1.05;letter-spacing:-.02em;font-weight:500;margin:0;}
+  .ms-hero-head .ms-h1{font-size:clamp(26px,3.4vw,44px);line-height:1.12;letter-spacing:-.02em;font-weight:500;margin:0;
+    max-width:30ch;text-wrap:balance;min-height:1.12em;}
   body[data-tab]:not([data-tab="overview"]) .ms-hero-head{display:none;}
 
   /* period + card line right under the slogan — plain text, not a block */
