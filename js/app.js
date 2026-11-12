@@ -1097,16 +1097,39 @@ async function refreshInBackground(opts){
     setTimeout(autoSync, 0); // fills the tail / recent holes, waiting out the rate limit itself
   }
 }
+const REFRESH_ICON = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v4h-4"/></svg>`;
 function refreshNoteHtml(){
   const r = state.refresh;
+  const btn = `<button type="button" class="ms-refresh" id="refreshNowBtn" title="Оновити дані" aria-label="Оновити дані">${REFRESH_ICON}</button>`;
   if(r.status==='loading') return '<span class="ms-spin"></span>Оновлюю дані з Monobank…';
-  if(r.status==='ok') return escapeHtml(r.msg);
-  if(r.status==='error') return `<span style="color:var(--rust)">${escapeHtml(r.msg)}</span> <button class="ms-icon-btn" id="refreshRetryBtn" style="text-decoration:underline">Повторити</button>${r.code==='token' ? ' <button class="ms-icon-btn" id="refreshTokenBtn" style="text-decoration:underline">Змінити токен</button>' : ''}`;
-  return '';
+  if(r.status==='wait') return `<span>Monobank дозволяє оновлення раз на хвилину — оновлю через ${r.seconds} с.</span>`;
+  if(r.status==='ok') return `<span>${escapeHtml(r.msg)}</span>${btn}`;
+  if(r.status==='error') return `<span style="color:var(--rust)">${escapeHtml(r.msg)}</span>${btn}${r.code==='token' ? ' <button class="ms-icon-btn" id="refreshTokenBtn" style="text-decoration:underline">Змінити токен</button>' : ''}`;
+  return `<span>Оновити дані</span>${btn}`;
 }
 function bindRefreshNote(el){
-  el.querySelector('#refreshRetryBtn')?.addEventListener('click', ()=>refreshInBackground());
+  el.querySelector('#refreshNowBtn')?.addEventListener('click', refreshNow);
   el.querySelector('#refreshTokenBtn')?.addEventListener('click', ()=>{ state.step='connect'; render(); });
+}
+// The ⟳ button: fresh balance + statement without reloading the page. Monobank allows one
+// statement request a minute — clicked sooner, it counts down and refreshes by itself.
+let refreshWaitTimer = null;
+function refreshNow(){
+  if(state.refresh.status==='loading' || state.refresh.status==='wait') return;
+  const account = state.selectedAccount;
+  const leftMs = 61000 - (Date.now() - state.lastApiCall);
+  if(leftMs <= 0){ refreshInBackground(); return; }
+  let seconds = Math.ceil(leftMs/1000);
+  state.refresh = {status:'wait', msg:'', code:'', seconds};
+  updateRefreshNote();
+  clearInterval(refreshWaitTimer);
+  refreshWaitTimer = setInterval(()=>{
+    if(state.selectedAccount!==account || state.step!=='results' || state.refresh.status!=='wait'){ clearInterval(refreshWaitTimer); return; }
+    seconds--;
+    if(seconds > 0){ state.refresh.seconds = seconds; updateRefreshNote(); return; }
+    clearInterval(refreshWaitTimer);
+    refreshInBackground({retried:true});
+  }, 1000);
 }
 // targeted update — a full render() here would reset whatever she is doing on the page
 function updateRefreshNote(){
@@ -1515,7 +1538,7 @@ function rangePanel(){
       <div style="flex:1;font-size:13px;color:var(--muted)">Період: <b style="color:var(--text)">${state.from} → ${state.to}</b></div>
       ${IS_DEMO ? '' : '<button class="ms-btn secondary" id="backBtn">Змінити період</button>'}
     </div>
-    ${IS_DEMO ? '' : `<div class="ms-hint" id="refreshNote" style="margin:6px 0 0">${refreshNoteHtml()}</div>`}
+    ${IS_DEMO ? '' : `<div class="ms-hint ms-refresh-note" id="refreshNote" aria-live="polite">${refreshNoteHtml()}</div>`}
     <div class="ms-row" style="margin-top:10px;gap:8px">
       <button class="ms-btn${state.viewTab==='current'?'':' secondary'}" id="tabCurrent">Поточний період</button>
       <button class="ms-btn${state.viewTab==='previous'?'':' secondary'}" id="tabPrevious">${state.viewRange?'Цикл':'Попередній місяць'} (${prevLabel})${prevCount?' · '+prevCount+' оп. в кеші':' · немає в кеші'}</button>
