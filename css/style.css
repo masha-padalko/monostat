@@ -553,3 +553,5 @@
     color:var(--muted);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0;}
   .ms-eye:hover{background:var(--panel-hi);color:var(--text);}
   .ms-eye:focus-visible{outline:2px solid var(--gold);outline-offset:1px;}
+  .ms-panel.is-collapsed{align-self:start;}
+  .ms-panel.is-collapsed h2{margin:0;}
