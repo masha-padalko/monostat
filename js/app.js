@@ -21,6 +21,30 @@ const CATEGORY_RENAMES = {
 function sortedCats(){
   return [...CATS].sort((a,b)=>a.localeCompare(b,'uk'));
 }
+// Category pickers show "Часті" first: the 5 categories met most often in the selected card's
+// expenses over the last 90 days (+ manual entries), then every category alphabetically.
+// Counted once per render(); with too little history it's just the alphabet, as before.
+let frequentCatsMemo = null;
+function frequentCats(){
+  if(frequentCatsMemo) return frequentCatsMemo;
+  const since = Date.now() - 90*24*60*60*1000;
+  const counts = {};
+  const bump = c=>{ if(CATS.includes(c)) counts[c] = (counts[c]||0) + 1; };
+  accCache().forEach(it=>{ if(it.amount<0 && it.time*1000>=since) bump(categoryFor(mapRawItem(it))); });
+  state.manual.forEach(m=>{ if(m.amount<0 && new Date(m.date).getTime()>=since) bump(m.cat); });
+  const total = Object.values(counts).reduce((sum,n)=>sum+n, 0);
+  frequentCatsMemo = total < 10 ? [] : Object.entries(counts)
+    .sort((a,b)=>b[1]-a[1] || a[0].localeCompare(b[0],'uk'))
+    .slice(0,5).map(([c])=>c);
+  return frequentCatsMemo;
+}
+function categoryOptionsHtml(selected){
+  const opt = c=>`<option value="${escapeHtml(c)}"${c===selected?' selected':''}>${escapeHtml(c)}</option>`;
+  const top = frequentCats();
+  if(!top.length) return sortedCats().map(opt).join('');
+  const rest = sortedCats().filter(c=>!top.includes(c));
+  return `<optgroup label="Часті">${top.map(opt).join('')}</optgroup><optgroup label="Усі категорії">${rest.map(opt).join('')}</optgroup>`;
+}
 
 const COLORS = {
   'продукти':'#C9A24B','продукти спільні':'#C4A24B','таксі':'#4FA98C','транспорт':'#7FB7A3',
@@ -1272,6 +1296,7 @@ function parseManualJson(){
 function render(){
   const app = document.getElementById('app');
   app.innerHTML = '';
+  frequentCatsMemo = null; // categories may have changed since the last render
   const navSlot = document.getElementById('ms-nav-slot');
   if(navSlot) navSlot.innerHTML = '';     // resultsPanel() puts the tabs back when the dashboard is shown
   delete document.body.dataset.tab;
@@ -1616,12 +1641,7 @@ function buildDayTxList(label, list){
     }
     const sel = document.createElement('select');
     sel.className = 'ms-cat-select';
-    sortedCats().forEach(c=>{
-      const opt = document.createElement('option');
-      opt.value = c; opt.textContent = c;
-      if(c===t.cat) opt.selected = true;
-      sel.appendChild(opt);
-    });
+    sel.innerHTML = categoryOptionsHtml(t.cat);
     sel.addEventListener('change', e=>{ handleCategoryChange(t, e.target.value); });
     row.appendChild(chk);
     row.appendChild(icon);
@@ -1926,12 +1946,7 @@ function resultsPanel(){
 
     const sel = document.createElement('select');
     sel.className='ms-cat-select';
-    sortedCats().forEach(c=>{
-      const opt = document.createElement('option');
-      opt.value=c; opt.textContent=c;
-      if(c===t.cat) opt.selected=true;
-      sel.appendChild(opt);
-    });
+    sel.innerHTML = categoryOptionsHtml(t.cat);
     sel.addEventListener('change', e=>{ handleCategoryChange(t, e.target.value); });
     field('Категорія', sel);
 
@@ -2068,7 +2083,7 @@ function resultsPanel(){
         <select id="mCurrency">${MANUAL_CURRENCIES.map(c=>`<option value="${c.code}">${c.label}</option>`).join('')}</select>
       </div>
       <div class="ms-field" style="max-width:180px"><label>Категорія</label>
-        <select id="mCat">${CATS.map(c=>`<option value="${c}">${c}</option>`).join('')}</select>
+        <select id="mCat">${categoryOptionsHtml(frequentCats()[0] || CATS[0])}</select>
       </div>
       <button class="ms-btn" id="mAdd" style="align-self:flex-end">Додати</button>
     </div>
