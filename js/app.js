@@ -2545,6 +2545,11 @@ async function updateJarAccumulation(){
 // The frozen daily budget applies every day of the period, unchanged. Today's live
 // remaining (budget minus what's spent so far today) is shown flowing into the jar
 // total in real time, and gets permanently locked in once the day rolls over.
+// Eye like in password fields: open — the amount is shown, crossed out — hidden.
+function eyeIcon(open){
+  return `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>${open ? '' : '<path d="M4 4l16 16"/>'}</svg>`;
+}
 function buildDailyBudgetPanel(all){
   const p = document.createElement('div');
   p.className = 'ms-panel ms-card';
@@ -2561,24 +2566,25 @@ function buildDailyBudgetPanel(all){
   const endDateLabel = new Date(endDate+'T00:00:00').toLocaleDateString('uk-UA',{day:'numeric',month:'long',year:'numeric'});
 
   p.innerHTML = `
-    <h2>Скільки можна витрачати на день</h2>
-    <label class="ms-checkline">
-      <input type="checkbox" id="jarEnabledChk" ${state.jarEnabled?'checked':''}>
-      <span>Показувати цей блок</span>
-    </label>
-    ${state.jarEnabled ? `
-    <div style="margin-top:14px">
+    <h2>Скільки можна витрачати на день
+      <button type="button" class="ms-eye" id="jarEnabledBtn" aria-pressed="${state.jarEnabled}"
+        title="${state.jarEnabled?'Сховати суму':'Показати суму'}" aria-label="${state.jarEnabled?'Сховати суму':'Показати суму'}">${eyeIcon(state.jarEnabled)}</button>
+    </h2>
+    <div style="margin-top:10px">
       <div class="ms-field" style="max-width:260px;margin-bottom:12px">
-        <label for="dailyBudgetEndDate" title="Баланс ${fmt(acc.balance/100)} ${curSym()} ÷ ${days} дн. (до ${endDateLabel}, включно)">Розрахувати до дати · ${days} дн.</label>
+        <label for="dailyBudgetEndDate"${state.jarEnabled ? ` title="Баланс ${fmt(acc.balance/100)} ${curSym()} ÷ ${days} дн. (до ${endDateLabel}, включно)"` : ''}>Розрахувати до дати · ${days} дн.</label>
         <input type="date" id="dailyBudgetEndDate" min="${today}" value="${endDate}">
       </div>
+      ${state.jarEnabled ? `
       <div class="ms-today-amt" style="font-size:24px;color:var(--gold)">${fmt(dailyBudget)} ${curSym()}</div>
       <div class="ms-hint" style="margin:0;opacity:.8">${fmtEur(dailyBudget, curCode()).trim()}</div>
+      ` : `
+      <div class="ms-today-amt" style="font-size:24px;color:var(--muted);letter-spacing:.12em" aria-label="Суму сховано">••••••</div>
+      `}
     </div>
-    ` : ''}
   `;
-  p.querySelector('#jarEnabledChk').addEventListener('change', async e=>{
-    state.jarEnabled = e.target.checked;
+  p.querySelector('#jarEnabledBtn').addEventListener('click', async ()=>{
+    state.jarEnabled = !state.jarEnabled;
     await storageSet('ms_jarenabled', String(state.jarEnabled));
     render();
   });

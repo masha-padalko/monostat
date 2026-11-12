@@ -547,3 +547,9 @@
     .ms-logo-mark{width:22px;height:22px;}
     .ms-hero-head{margin-bottom:14px;}
   }
+
+  /* show/hide eye in a block title (like password fields) */
+  .ms-eye{margin-left:auto;flex:0 0 auto;width:32px;height:32px;border:0;border-radius:50%;background:transparent;
+    color:var(--muted);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0;}
+  .ms-eye:hover{background:var(--panel-hi);color:var(--text);}
+  .ms-eye:focus-visible{outline:2px solid var(--gold);outline-offset:1px;}
