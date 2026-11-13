@@ -504,17 +504,48 @@
   .ms-topbar > .ms-header-right{grid-area:right;justify-self:end;}
   .ms-header-link{font-size:13px;color:var(--gold);text-decoration:none;white-space:nowrap;}
   .ms-header-link:hover{text-decoration:underline;}
+  /* "Баланси" — a real button in the header */
+  .ms-header-btn{display:inline-flex;align-items:center;gap:7px;padding:9px 16px;border-radius:999px;background:var(--gold);color:#FFFCF5;
+    font-size:14px;font-weight:600;text-decoration:none;white-space:nowrap;transition:background .15s;}
+  .ms-header-btn:hover{background:#A3742F;}
+  .ms-header-btn:focus-visible{outline:2px solid var(--text);outline-offset:2px;}
 
   .ms-hero-head{margin:0 0 18px;}
   .ms-hero-head .ms-h1{font-size:clamp(26px,3.4vw,44px);line-height:1.12;letter-spacing:-.02em;font-weight:500;margin:0;
     max-width:30ch;text-wrap:balance;min-height:1.12em;}
   body[data-tab]:not([data-tab="overview"]) .ms-hero-head{display:none;}
 
-  /* period + card line right under the slogan — plain text, not a block */
+  /* period pill + refresh + card switch — plain, not a block */
   .ms-rangebar{margin:0 0 18px;}
-  .ms-rangebar .ms-row{gap:8px 12px;}
-  .ms-rangebar .ms-btn{padding:8px 14px;font-size:13px;}
+  .ms-overview .ms-rangebar{margin:0;}
   .ms-rangebar .ms-hint{font-size:12px;color:var(--muted);line-height:1.5;}
+  .ms-link-btn{border:0;background:none;padding:4px 0;color:var(--gold);font:inherit;font-size:13px;cursor:pointer;}
+  .ms-link-btn:hover{text-decoration:underline;}
+
+  /* period picker: rounded pill "📅 1–13 лист. 2026 ⌄" */
+  .ms-period{position:relative;display:inline-block;max-width:100%;}
+  .ms-period-btn{display:inline-flex;align-items:center;gap:14px;max-width:100%;padding:13px 20px;border:0;border-radius:999px;
+    background:var(--panel-hi);color:var(--text);font:inherit;font-size:16px;cursor:pointer;transition:background .15s;}
+  .ms-period-btn:hover{background:#EADFC8;}
+  .ms-period-btn:focus-visible{outline:2px solid var(--gold);outline-offset:2px;}
+  .ms-period-ic{display:inline-flex;color:var(--muted);}
+  .ms-period-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .ms-period-chev{display:inline-flex;transition:transform .15s;}
+  .ms-period-btn[aria-expanded="true"] .ms-period-chev{transform:rotate(180deg);}
+  .ms-period-menu{position:absolute;z-index:20;top:calc(100% + 6px);left:0;min-width:260px;padding:8px;border-radius:18px;
+    background:var(--panel);box-shadow:0 12px 32px rgba(74,54,35,.16);display:flex;flex-direction:column;gap:2px;}
+  .ms-period-opt{border:0;background:none;text-align:left;padding:10px 12px;border-radius:12px;font:inherit;font-size:14px;color:var(--text);cursor:pointer;}
+  .ms-period-opt:hover{background:var(--panel-hi);}
+  .ms-period-opt.is-active{background:#EFDDB8;font-weight:600;}
+  .ms-period-custom{border-top:1px solid var(--line);margin-top:6px;padding:10px 4px 4px;display:flex;flex-direction:column;gap:8px;}
+  .ms-period-custom-lbl{font-size:12px;color:var(--muted);padding:0 8px;}
+  .ms-period-dates{display:flex;align-items:center;gap:6px;}
+  .ms-period-dates input{flex:1;min-width:0;padding:8px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--text);font:inherit;font-size:13px;}
+  .ms-period-custom .ms-btn{padding:9px 14px;font-size:13px;}
+
+  /* pencil next to an operation she entered by hand */
+  .ms-manual{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;margin-left:6px;border-radius:50%;
+    background:var(--panel-hi);color:var(--gold);vertical-align:-4px;}
 
   .ms-overview{display:grid;grid-template-columns:minmax(0,2fr) minmax(300px,1fr);gap:14px;align-items:start;}
   .ms-ov-main,.ms-ov-side{display:flex;flex-direction:column;gap:14px;min-width:0;}
@@ -535,7 +566,7 @@
     .ms-overview{display:flex;flex-direction:column;align-items:stretch;}
     .ms-ov-general .ms-hero{flex-direction:column;align-items:center;}
     .ms-ov-main,.ms-ov-side,.ms-ov-cardrow{display:contents;}
-    .ms-ov-card{order:1;} .ms-ov-budget{order:2;} .ms-ov-today{order:3;} .ms-ov-general{order:4;} .ms-ov-recurring{order:5;}
+    .ms-ov-card{order:1;} .ms-ov-range{order:2;} .ms-ov-budget{order:3;} .ms-ov-today{order:4;} .ms-ov-general{order:5;} .ms-ov-recurring{order:6;}
     .ms-ov-card .ms-balance-card{max-width:440px;height:auto;aspect-ratio:auto;}
   }
   @media (max-width:760px){

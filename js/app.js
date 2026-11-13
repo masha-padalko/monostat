@@ -190,12 +190,14 @@ let state = {
   txCache: [...window.MonoStatDefaults.DEFAULT_TX_CACHE],  // every raw transaction ever successfully fetched, deduped by id — lets old periods stay visible without re-querying the API
   jarPending: 0,       // running total of unsent daily savings, accumulates day over day instead of resetting
   jarLastDate: null,    // last date whose savings were already folded into jarPending
-  jarPeriodStart: null, // which 10th-to-10th cycle jarPending belongs to (resets on a new cycle)
+  jarPeriodStart: null, // which month jarPending belongs to (resets on a new month)
   jarEnabled: true,      // optional — on by default for now, since she needs it this period
   jarDailyBudget: null,  // FROZEN at enable time — deliberately does not shrink/grow as balance changes day to day
   jarDraftStartDate: null, // transient — whatever she's currently picked in the date field, before clicking (Re)start
   jarStartDateActual: null, // when THIS tracking run actually began — fixed, unlike jarLastDate which advances to today once caught up
   jarAutoCheckedThisLoad: false, // ensures the background jar catch-up only runs once per page load, never re-fires mid-interaction
+  period: {preset:'month'}, // chosen period (ms_period): a preset id or {preset:'custom', from, to}
+  periodOpen: false,         // period dropdown unfolded
   dailyBudgetEndDate: null, // selected date through which to spread the current card balance
   recurringHidden: [], // ids of recurring-payment rows the user hid (ms_recurring_hidden)
   historySearch: {q:'', from:'', to:'', min:'', max:'', cat:'', kind:'all', limit:100}, // filters of the whole-history search panel
@@ -358,6 +360,7 @@ async function loadPersisted(){
   const rh = await storageGet('ms_recurring_hidden'); if(rh){ try{ state.recurringHidden = JSON.parse(rh)||[]; }catch(e){} }
   const tr = await storageGet('ms_trips'); if(tr) state.trips = JSON.parse(tr);
   const to_ = await storageGet('ms_tripof'); if(to_) state.tripOf = JSON.parse(to_);
+  const pr = await storageGet('ms_period'); if(pr){ try{ const v = JSON.parse(pr); if(v && v.preset) state.period = v; }catch(e){} }
   const sa = await storageGet('ms_selectedaccount'); if(sa) state.lastAccountId = sa;
   const cc = await storageGet('ms_customcats');
   if(cc){
@@ -903,29 +906,69 @@ function daysAgoStr(n){
   return todayStr(dt);
 }
 
-// Her budgeting month runs 10th-to-10th (payday). If today is already past the 10th,
-// the current period started this month; otherwise it started the 10th of last month.
+// First day of the current calendar month (the default period starts here).
 function defaultPeriodStart(){
   const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getDate() >= 10 ? now.getMonth() : now.getMonth()-1;
-  const dt = new Date(year, month, 10);
-  return todayStr(dt);
+  return todayStr(new Date(now.getFullYear(), now.getMonth(), 1));
 }
 
-// The next 10th (payday) — her period always ends the day before this.
+// Last day of the month (inclusive) — the default "spread the balance until" date.
 function nextPeriodBoundary(fromDateStr){
   const now = fromDateStr ? new Date(fromDateStr+'T00:00:00') : new Date();
-  const year = now.getFullYear();
-  const month = now.getDate() >= 10 ? now.getMonth()+1 : now.getMonth();
-  return new Date(year, month, 10);
+  return new Date(now.getFullYear(), now.getMonth()+1, 0);
+}
+
+// ---------- period ----------
+// She picks the period herself (a preset or her own dates); the choice is saved and used
+// on the next visit. Presets are re-read every day, so "Цей місяць" always ends today.
+const PERIOD_PRESETS = [
+  {id:'month',     label:'Цей місяць'},
+  {id:'30d',       label:'Останні 30 днів'},
+  {id:'prevMonth', label:'Минулий місяць'},
+];
+function resolvePeriod(p){
+  const now = new Date(), y = now.getFullYear(), m = now.getMonth();
+  const today = todayStr();
+  if(p && p.preset==='custom' && p.from && p.to) return p.from <= p.to ? {from:p.from, to:p.to} : {from:p.to, to:p.from};
+  if(p && p.preset==='30d') return {from:daysAgoStr(29), to:today};
+  if(p && p.preset==='prevMonth') return {from:todayStr(new Date(y, m-1, 1)), to:todayStr(new Date(y, m, 0))};
+  return {from:todayStr(new Date(y, m, 1)), to:today};
+}
+function applyPeriod(){
+  const r = resolvePeriod(state.period);
+  state.from = r.from; state.to = r.to;
+}
+// "1–13 лист. 2026" / "28 жовт. – 13 лист. 2026"
+function periodLabel(from, to){
+  const a = new Date(from+'T00:00:00'), b = new Date(to+'T00:00:00');
+  const mon = d => d.toLocaleDateString('uk-UA',{month:'short'});
+  if(a.getFullYear()!==b.getFullYear()) return `${a.getDate()} ${mon(a)} ${a.getFullYear()} – ${b.getDate()} ${mon(b)} ${b.getFullYear()}`;
+  if(a.getMonth()!==b.getMonth()) return `${a.getDate()} ${mon(a)} – ${b.getDate()} ${mon(b)} ${b.getFullYear()}`;
+  return a.getDate()===b.getDate() ? `${a.getDate()} ${mon(a)} ${a.getFullYear()}` : `${a.getDate()}–${b.getDate()} ${mon(b)} ${b.getFullYear()}`;
+}
+async function setPeriod(p){
+  state.period = p;
+  state.periodOpen = false;
+  applyPeriod();
+  await storageSet('ms_period', JSON.stringify(p));
+  if(IS_DEMO){ refreshCurrentView(); render(); return; }
+  refreshCurrentView(); // what the cache already has — at once
+  render();
+  if(state.refresh.status==='loading') refreshInBackground({skipInfo:true}); // the running one asked for the old dates
+  else refreshNow(); // waits out the once-a-minute limit if needed
+}
+// Monobank gives at most 31 days per request: a longer period asks only for its last 31 days
+// (older days come from the cache / background sync). Never asks for the future.
+function apiRange(fromStr, toStr){
+  const b = Math.min(Math.floor(new Date(toStr+'T23:59:59').getTime()/1000), Math.floor(Date.now()/1000));
+  const a = Math.max(Math.floor(new Date(fromStr+'T00:00:00').getTime()/1000), b - 31*86400 + 1);
+  return [Math.min(a,b), b];
 }
 function daysUntilPeriodEnd(fromDateStr){
   const now = fromDateStr ? new Date(fromDateStr+'T00:00:00') : new Date();
   now.setHours(0,0,0,0);
   const boundary = nextPeriodBoundary(fromDateStr); boundary.setHours(0,0,0,0);
-  // +1 because both endpoints count as full days (today AND the 10th itself),
-  // not just the number of nights between them
+  // +1 because both endpoints count as full days (today AND the last day itself)
   return Math.max(1, Math.round((boundary.getTime()-now.getTime())/(24*60*60*1000)) + 1);
 }
 
@@ -1051,8 +1094,7 @@ async function refreshInBackground(opts){
   const from = state.from, to = state.to;
   state.refresh = {status:'loading', msg:'', code:''};
   updateRefreshNote();
-  const fromUnix = Math.floor(new Date(from+'T00:00:00').getTime()/1000);
-  const toUnix = Math.floor(new Date(to+'T23:59:59').getTime()/1000);
+  const [fromUnix, toUnix] = apiRange(from, to);
   const [infoRes, stRes] = await Promise.allSettled([
     info || skipInfo ? Promise.resolve(info||null) : fetchClientInfo(token),
     fetchStatement(token, account, fromUnix, toUnix)
@@ -1157,8 +1199,7 @@ async function handleConnect(){
     const known = last || (state.accounts.length===1 ? state.accounts[0] : null);
     if(known){
       state.selectedAccount = known.id;
-      if(!state.from) state.from = defaultPeriodStart();
-      if(!state.to) state.to = todayStr();
+      applyPeriod();
       rememberSelectedAccount();
       state.loading = false;
       openDashboard(info);
@@ -1199,8 +1240,7 @@ function startDemo(){
   state.trips = (m.trips||[]).map(t=>({...t, dateFrom: shiftDay(t.dateFrom), dateTo: shiftDay(t.dateTo)}));
   state.manual = (m.manual||[]).map(x=>({...x, date: shiftDay(x.date)}));
   state.notes = {}; state.debts = []; state.loanKeys = {}; state.usedIncoming = {};
-  state.from = shiftDay(m.periodFrom) || defaultPeriodStart();
-  state.to = todayStr();
+  applyPeriod();
   const lastBal = state.txCache.length ? state.txCache.reduce((a,b)=>a.time>b.time?a:b).balance : 0;
   state.accounts = [{id:'demo', pan:'5375 •••• •••• 0000', type:'black', currency:980, balance:lastBal}];
   state.selectedAccount = 'demo';
@@ -1220,8 +1260,8 @@ async function handleFetchStatement(){
   state.error = null;
   state.loading = true; render();
   try{
-    const fromUnix = Math.floor(new Date(state.from+'T00:00:00').getTime()/1000);
-    const toUnix = Math.floor(new Date(state.to+'T23:59:59').getTime()/1000);
+    applyPeriod();
+    const [fromUnix, toUnix] = apiRange(state.from, state.to);
     const account = state.selectedAccount;
     const items = await fetchStatement(state.token.trim(), account, fromUnix, toUnix);
     mergeIntoCache(items, account);
@@ -1287,8 +1327,7 @@ function getAllHistoricalExpenses(){
 // was never fetched before, the cache simply won't have it (shown as an empty state).
 function getPrevMonthRange(){
   if(state.viewRange) return {start:new Date(state.viewRange.start), end:new Date(state.viewRange.end)};
-  // aligned to her actual budgeting cycle — ends ON the 10th itself (state.from), starts
-  // exactly one month earlier
+  // the month right before the selected period's start
   const base = state.from ? new Date(state.from+'T00:00:00') : new Date();
   const prevEnd = new Date(base);
   const prevStart = new Date(base.getFullYear(), base.getMonth()-1, base.getDate());
@@ -1386,8 +1425,7 @@ function authPanel(){
     if(error){ state.authError = error.message; render(); return; }
     state.authError = null;
     await loadPersisted();
-    if(!state.from) state.from = defaultPeriodStart(); // was missing — caused NaN/NaN in the statement URL
-    if(!state.to) state.to = todayStr();
+    applyPeriod();
     state.initialLoading = false;
     autoStart();
   };
@@ -1484,19 +1522,16 @@ function accountsPanel(){
   p.className='ms-panel';
   const currNames = {980:'UAH',978:'EUR',840:'USD',985:'PLN',946:'RON'};
   p.innerHTML = `
-    <h2>Крок 2 · Обери картку та період</h2>
+    <h2>Крок 2 · Обери картку</h2>
     <p class="ms-hint">Знайдено ${state.accounts.length} рахунків/карток.</p>
     <div class="ms-accounts" id="accList"></div>
     <div class="ms-row" style="margin-top:16px">
-      <div class="ms-field"><label>З дати</label><input type="date" id="fromInput" value="${state.from||defaultPeriodStart()}"></div>
-      <div class="ms-field"><label>По дату</label><input type="date" id="toInput" value="${state.to||todayStr()}"></div>
       <button class="ms-btn" id="loadBtn" ${state.loading?'disabled':''}>${state.loading?'<span class="ms-spin"></span>Завантаження…':'Завантажити виписку'}</button>
     </div>
-    <p class="ms-hint" style="margin-top:8px">Максимум — 31 доба за раз (обмеження API).</p>
-    <p class="ms-hint">У кеші зараз ${state.txCache.length} операцій з минулих завантажень — після завантаження нового періоду попередній місяць можна буде глянути окремою вкладкою «Попередній місяць», без нового запиту.</p>
+    <p class="ms-hint" style="margin-top:8px">Період (${periodLabel(...Object.values(resolvePeriod(state.period)))}) можна змінити потім на дашборді.</p>
     ${state.txCache.length ? `<button class="ms-btn secondary" id="clearCacheBtn" style="margin-top:10px">Очистити кеш (${state.txCache.length} оп.)</button>` : ''}
     <button class="ms-btn secondary" id="changeTokenBtn" style="margin-top:10px">Змінити токен</button>
-    ${state.error==='statement' ? '<div class="ms-error">Не вдалося отримати виписку. Перевір період (не більше 31 дня) і що з моменту підключення пройшло хоч трохи часу — API дозволяє один запит на 60 секунд.</div>':''}
+    ${state.error==='statement' ? '<div class="ms-error">Не вдалося отримати виписку. Зачекай хвилину — API Monobank дозволяє один запит на 60 секунд.</div>':''}
   `;
   const list = p.querySelector('#accList');
   state.accounts.forEach(a=>{
@@ -1506,8 +1541,6 @@ function accountsPanel(){
     row.addEventListener('click', ()=>{state.selectedAccount=a.id; render();});
     list.appendChild(row);
   });
-  p.querySelector('#fromInput').addEventListener('input', e=>state.from=e.target.value);
-  p.querySelector('#toInput').addEventListener('input', e=>state.to=e.target.value);
   p.querySelector('#loadBtn').addEventListener('click', handleFetchStatement);
   p.querySelector('#changeTokenBtn').addEventListener('click', ()=>{state.step='connect'; render();});
   const clearBtn = p.querySelector('#clearCacheBtn');
@@ -1517,34 +1550,64 @@ function accountsPanel(){
   return p;
 }
 
+// Marks an operation she typed in herself (cash etc.), not one from Monobank.
+const MANUAL_BADGE = `<span class="ms-manual" title="Внесено вручну" aria-label="Внесено вручну" role="img"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg></span>`;
+const CALENDAR_ICON = `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="4"/><path d="M8 3v4M16 3v4M3.5 10h17"/></svg>`;
+const CHEVRON_ICON = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 10l5 5 5-5"/></svg>`;
+// The period pill: "📅 1–13 лист. 2026 ⌄" — opens presets and her own dates.
+function periodPicker(){
+  const wrap = document.createElement('div');
+  wrap.className = 'ms-period';
+  const preset = state.period.preset;
+  const custom = resolvePeriod(state.period);
+  wrap.innerHTML = `
+    <button type="button" class="ms-period-btn" id="periodBtn" aria-expanded="${state.periodOpen}" aria-haspopup="true">
+      <span class="ms-period-ic">${CALENDAR_ICON}</span>
+      <span class="ms-period-label">${periodLabel(state.from, state.to)}</span>
+      <span class="ms-period-chev">${CHEVRON_ICON}</span>
+    </button>
+    ${state.periodOpen ? `<div class="ms-period-menu" role="menu">
+      ${PERIOD_PRESETS.map(x=>`<button type="button" class="ms-period-opt${x.id===preset?' is-active':''}" data-preset="${x.id}" role="menuitemradio" aria-checked="${x.id===preset}">${x.label}</button>`).join('')}
+      <div class="ms-period-custom">
+        <div class="ms-period-custom-lbl">Свої дати</div>
+        <div class="ms-period-dates">
+          <input type="date" id="periodFrom" value="${custom.from}" max="${todayStr()}" aria-label="З дати">
+          <span aria-hidden="true">–</span>
+          <input type="date" id="periodTo" value="${custom.to}" max="${todayStr()}" aria-label="По дату">
+        </div>
+        <button type="button" class="ms-btn" id="periodApply">Показати</button>
+      </div>
+    </div>` : ''}`;
+  wrap.querySelector('#periodBtn').addEventListener('click', ()=>{ state.periodOpen = !state.periodOpen; render(); });
+  wrap.querySelectorAll('[data-preset]').forEach(b=>b.addEventListener('click', ()=>setPeriod({preset:b.dataset.preset})));
+  wrap.querySelector('#periodApply')?.addEventListener('click', ()=>{
+    const f = wrap.querySelector('#periodFrom').value, t = wrap.querySelector('#periodTo').value;
+    if(!f || !t) return;
+    setPeriod({preset:'custom', from:f, to:t});
+  });
+  return wrap;
+}
+// close the period menu on a click outside it or Esc
+document.addEventListener('click', e=>{
+  if(state.periodOpen && !e.target.closest('.ms-period')){ state.periodOpen = false; render(); }
+});
+document.addEventListener('keydown', e=>{
+  if(e.key==='Escape' && state.periodOpen){ state.periodOpen = false; render(); document.getElementById('periodBtn')?.focus(); }
+});
+
 function rangePanel(){
   const p = document.createElement('div');
   p.className='ms-rangebar';
-  const {start, end} = getPrevMonthRange();
-  const prevLabel = `${start.toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'})} – ${end.toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'})}`;
-  const prevCount = accCache().filter(it=>{const d=it.time*1000; return d>=start.getTime() && d<=end.setHours(23,59,59,999);}).length;
   const currNames = {980:'UAH',978:'EUR',840:'USD',985:'PLN',946:'RON'};
   const accLabel = a => `${escapeHtml(a.type||'')} · ${currNames[a.currency]||escapeHtml(String(a.currency))}`;
-  const acc = state.accounts.find(a=>a.id===state.selectedAccount);
   const canSwitch = !IS_DEMO && state.accounts.length>1;
-  const cardLine = !acc || IS_DEMO ? '' : `
-    <div class="ms-row" style="align-items:center;flex-wrap:wrap;margin-bottom:8px">
-      <div style="flex:1;font-size:13px;color:var(--muted)">Картка: <b style="color:var(--text)">${accLabel(acc)}</b> <span style="font-family:var(--font-mono)">${escapeHtml(acc.pan||'')}</span></div>
-      ${canSwitch ? `<button class="ms-btn secondary" id="cardPickerBtn" aria-expanded="${state.cardPickerOpen}">Інша картка ${state.cardPickerOpen?'▴':'▾'}</button>` : ''}
-    </div>
-    ${canSwitch && state.cardPickerOpen ? '<div class="ms-accounts" id="cardPickerList" style="margin-bottom:12px"></div>' : ''}`;
-  p.innerHTML = `${cardLine}
-    <div class="ms-row" style="align-items:center;flex-wrap:wrap">
-      <div style="flex:1;font-size:13px;color:var(--muted)">Період: <b style="color:var(--text)">${state.from} → ${state.to}</b></div>
-      ${IS_DEMO ? '' : '<button class="ms-btn secondary" id="backBtn">Змінити період</button>'}
-    </div>
+  p.innerHTML = `
+    <div class="ms-rangebar-top"></div>
     ${IS_DEMO ? '' : `<div class="ms-hint ms-refresh-note" id="refreshNote" aria-live="polite">${refreshNoteHtml()}</div>`}
-    <div class="ms-row" style="margin-top:10px;gap:8px">
-      <button class="ms-btn${state.viewTab==='current'?'':' secondary'}" id="tabCurrent">Поточний період</button>
-      <button class="ms-btn${state.viewTab==='previous'?'':' secondary'}" id="tabPrevious">${state.viewRange?'Цикл':'Попередній місяць'} (${prevLabel})${prevCount?' · '+prevCount+' оп. в кеші':' · немає в кеші'}</button>
-    </div>
+    ${canSwitch ? `<button class="ms-link-btn" id="cardPickerBtn" aria-expanded="${state.cardPickerOpen}">Інша картка ${state.cardPickerOpen?'▴':'▾'}</button>` : ''}
+    ${canSwitch && state.cardPickerOpen ? '<div class="ms-accounts" id="cardPickerList" style="margin-top:8px"></div>' : ''}
   `;
-  p.querySelector('#backBtn')?.addEventListener('click', ()=>{state.step='accounts'; render();});
+  p.querySelector('.ms-rangebar-top').appendChild(periodPicker());
   p.querySelector('#cardPickerBtn')?.addEventListener('click', ()=>{state.cardPickerOpen=!state.cardPickerOpen; render();});
   const pickerList = p.querySelector('#cardPickerList');
   if(pickerList) state.accounts.forEach(a=>{
@@ -1558,8 +1621,6 @@ function rangePanel(){
     pickerList.appendChild(row);
   });
   bindRefreshNote(p);
-  p.querySelector('#tabCurrent').addEventListener('click', ()=>{state.viewTab='current'; state.viewRange=null; render();});
-  p.querySelector('#tabPrevious').addEventListener('click', ()=>{state.viewTab='previous'; state.viewRange=null; render();});
   return p;
 }
 
@@ -1577,8 +1638,8 @@ function buildTodayPanel(all){
     .filter(t=>t.amount<0 && !state.loanKeys[txKey(t)])
     .map(t=>applyShare({...t, cat: categoryFor(t)}));
 
-  // Today/yesterday don't depend on the selected period: on the 10th the new cycle starts,
-  // and yesterday (the 9th) belongs to the previous one — so also pull those two days from
+  // Today/yesterday don't depend on the selected period: on the 1st a new month starts,
+  // and yesterday belongs to the previous one — so also pull those two days from
   // the cache of everything already fetched, plus the separate last-48h fetch, deduped.
   const seen = new Set();
   const source = [];
@@ -1605,8 +1666,7 @@ function buildTodayPanel(all){
     return `<div class="ms-today-card highlight"><div class="ms-today-lbl">${label}</div><div class="ms-today-amt">${fmt(amt)} ${curSym()}</div></div>`;
   };
 
-  p.innerHTML = `<h2>Зараз</h2><p class="ms-hint">Оновлюється щоразу, як заходиш — без потреби гортати графік. Категорію тут теж можна поправити — зміна застосується і у загальній виписці, і надалі.</p>
-    <div class="ms-today-row">
+  p.innerHTML = `<div class="ms-today-row">
       ${cardHtml('Сьогодні', todayAmt)}
       ${cardHtml('Вчора', yestAmt)}
     </div>
@@ -1648,10 +1708,11 @@ function buildDayTxList(label, list){
     time.style.fontFamily = 'var(--font-mono)';
     time.style.fontSize = '11px';
     time.style.minWidth = '38px';
-    time.textContent = t.date.toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'});
+    time.textContent = t.manual ? '' : t.date.toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'});
     const name = document.createElement('span');
     name.className = 'ms-today-cat-name';
     name.textContent = t.desc;
+    if(t.manual) name.insertAdjacentHTML('beforeend', MANUAL_BADGE);
     const amt = document.createElement('span');
     amt.className = 'ms-today-cat-amt';
     const foreignCur = t.currency && t.currency !== curCode();
@@ -1932,13 +1993,13 @@ function resultsPanel(){
     const color = COLORS[t.cat] || '#8C7A5C';
     const tripId = tripIdFor(t);
     const tripName = tripId ? (state.trips.find(x=>x.id===tripId)||{}).name : '';
-    const time = t.manual ? 'ручне' : t.date.toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'});
+    const time = t.manual ? '' : t.date.toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'})+' · ';
     const foreign = !t.manual && t.currency && t.currency!==curCode() && t.operationAmount;
     row.innerHTML = `
       <span class="ms-txicon" style="background:${color}22;color:${color}">${ICONS[t.cat]||'•'}</span>
       <span class="ms-txmain">
         <span class="ms-txdesc"></span>
-        <span class="ms-txsub">${time} · ${escapeHtml(t.cat)}${tripName?` · ✈️ ${escapeHtml(tripName)}`:''}${isNotExpense?' · не витрата':''}</span>
+        <span class="ms-txsub">${time}${escapeHtml(t.cat)}${tripName?` · ✈️ ${escapeHtml(tripName)}`:''}${isNotExpense?' · не витрата':''}</span>
       </span>
       <span class="ms-txamt">
         <span class="ms-amt-neg">−${fmt(t.amount)}</span>
@@ -1946,6 +2007,7 @@ function resultsPanel(){
         ${foreign ? `<small>${fmt(Math.abs(t.operationAmount))} ${CURRENCY_SYMBOLS[t.currency]||''}</small>` : ''}
       </span>`;
     row.querySelector('.ms-txdesc').textContent = t.desc + (existingNote ? ' 📝' : '');
+    if(t.manual) row.querySelector('.ms-txdesc').insertAdjacentHTML('beforeend', MANUAL_BADGE);
     if(t.bankComment || existingNote){
       const notes = document.createElement('span');
       notes.className = 'ms-txnote';
@@ -2183,11 +2245,10 @@ function resultsPanel(){
   document.body.dataset.tab = tab;
 
   if(tab==='overview'){
-    gap(panelRange); wrap.appendChild(panelRange);
 
-    // left: bank card + "how much per day" side by side, "Загальна картина" under them;
-    // right: "Зараз" (today/yesterday) with "Регулярні платежі" under it.
-    // On a phone it's one column: card, per day, Зараз, Загальна картина, Регулярні платежі.
+    // left: bank card (right under the heading) + "how much per day" side by side,
+    // "Загальна картина" under them; right: period, "Зараз" (today/yesterday), "Регулярні платежі".
+    // On a phone it's one column: card, period, per day, Зараз, Загальна картина, Регулярні платежі.
     const panelRecurring = buildRecurringPaymentsPanel();
     const overview = document.createElement('div');
     overview.className = 'ms-overview';
@@ -2200,12 +2261,14 @@ function resultsPanel(){
     panel1.classList.add('ms-ov-general');
     panelToday.classList.add('ms-ov-today');
     panelRecurring.classList.add('ms-ov-recurring');
+    panelRange.classList.add('ms-ov-range');
     cardRow.appendChild(panelBalance);
     cardRow.appendChild(panelDailyBudget);
     main.appendChild(cardRow);
     main.appendChild(panel1);
     const side = document.createElement('div');
     side.className = 'ms-ov-side';
+    side.appendChild(panelRange);
     side.appendChild(panelToday);
     if(!panelRecurring.hidden) side.appendChild(panelRecurring);
     overview.appendChild(main);
@@ -2432,8 +2495,8 @@ function buildBalancePanel(){
   const currNames = {980:'UAH',978:'EUR',840:'USD',985:'PLN',946:'RON'};
   if(!acc){ p.innerHTML = ''; return p; }
   // Cashback accumulated since the last "Виведення кешбеку" (cashback withdrawal) — what's
-  // actually sitting in Monobank now, independent of the selected period (on the 10th a new
-  // period starts and a period-only sum would drop to almost zero). The API has no
+  // actually sitting in Monobank now, independent of the selected period (when a new period
+  // starts a period-only sum would drop to almost zero). The API has no
   // "accumulated cashback balance", only a per-operation `cashbackAmount`, so it's summed
   // over every cached operation after the last withdrawal. Miles cards report miles, not money.
   let cashbackPill = '';
@@ -2481,7 +2544,7 @@ function buildBalancePanel(){
 }
 
 // How much she can spend per day for the rest of this budgeting period (balance split
-// evenly across the days left until the 10th), plus a day-by-day look back at whether
+// evenly across the days left until the chosen date), plus a day-by-day look back at whether
 // she stayed under that line — days she did are highlighted, so she knows what's left
 // to send to the savings jar.
 function effectiveAmountGlobal(t){
@@ -2525,7 +2588,7 @@ async function setJarEnabled(enabled, startDate){
 // Folds each fully-completed day's under/over-spend into a persisted running total,
 // exactly once per day, always measured against the SAME frozen daily budget (set once
 // when tracking was turned on) — not a number that's recalculated from today's balance.
-// Resets only when a new 10th-to-10th cycle starts.
+// Resets only when a new month starts.
 async function updateJarAccumulation(){
   if(!state.jarEnabled) return;
   const acc = state.accounts.find(a=>a.id===state.selectedAccount);
@@ -2755,7 +2818,7 @@ function setSyncText(msg){
 // After new data lands in the cache, refresh what the "current period" view shows.
 function refreshCurrentView(){
   if(state.step==='results' && state.viewTab==='current' && state.from){
-    if(state.to < todayStr()) state.to = todayStr();
+    applyPeriod(); // presets move with the calendar ("Цей місяць" ends today)
     const a = Math.floor(new Date(state.from+'T00:00:00').getTime()/1000);
     const b = Math.floor(new Date(state.to+'T23:59:59').getTime()/1000);
     ingestTransactions(accCache().filter(it=>it.time>=a && it.time<=b));
@@ -3555,8 +3618,7 @@ if(IS_DEMO){ startDemo(); } else initAuth().then(()=>{
   state.authChecking = false;
   if(!authUserId){ state.initialLoading = false; render(); return; }
   return loadPersisted().then(()=>{
-    state.from = defaultPeriodStart(); // her budgeting month runs from the 10th (payday) to the 10th
-    state.to = todayStr();
+    applyPeriod(); // the period she chose last time (default: this month)
     state.initialLoading = false;
     autoStart();
   });
