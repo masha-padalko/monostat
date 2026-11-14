@@ -345,7 +345,9 @@
   .ms-bc-chip::after{top:0;bottom:0;left:35%;width:1px;box-shadow:12px 0 0 rgba(60,60,66,0.45);}
   .ms-bc-nfc{width:26px;height:26px;color:rgba(255,255,255,0.75);}
   .ms-bc-bottom{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;}
-  .ms-bc-cashback{display:flex;flex-direction:column;align-items:flex-end;gap:2px;padding:8px 12px;border-radius:14px;background:rgba(255,255,255,0.09);border:1px solid rgba(255,255,255,0.14);color:#fff;font-family:var(--font-mono);white-space:nowrap;}
+  .ms-bc-cashback{cursor:pointer;text-align:right;font:inherit;display:flex;flex-direction:column;align-items:flex-end;gap:2px;padding:8px 12px;border-radius:14px;background:rgba(255,255,255,0.09);border:1px solid rgba(255,255,255,0.14);color:#fff;font-family:var(--font-mono);white-space:nowrap;}
+  .ms-bc-cashback:hover{background:rgba(255,255,255,0.14);}
+  .ms-bc-cashback:focus-visible{outline:2px solid #e8c46a;outline-offset:2px;}
   .ms-bc-cashback svg{width:20px;height:20px;color:#e8c46a;}
   .ms-bc-cashback span{font-size:14px;font-weight:600;}
   .ms-bc-cashback .ms-bc-cb-net{margin-top:4px;padding-top:4px;border-top:1px solid rgba(255,255,255,0.14);color:#9fd8a8;}

@@ -198,6 +198,7 @@ let state = {
   jarAutoCheckedThisLoad: false, // ensures the background jar catch-up only runs once per page load, never re-fires mid-interaction
   period: {preset:'month'}, // chosen period (ms_period): a preset id or {preset:'custom', from, to}
   periodOpen: false,         // period dropdown unfolded
+  cashbackAnchor: null, // {amount, time}: cashback she typed in from the Monobank app (ms_cashbackanchor)
   dailyBudgetEndDate: null, // selected date through which to spread the current card balance
   recurringHidden: [], // ids of recurring-payment rows the user hid (ms_recurring_hidden)
   historySearch: {q:'', from:'', to:'', min:'', max:'', cat:'', kind:'all', limit:100}, // filters of the whole-history search panel
@@ -360,6 +361,7 @@ async function loadPersisted(){
   const rh = await storageGet('ms_recurring_hidden'); if(rh){ try{ state.recurringHidden = JSON.parse(rh)||[]; }catch(e){} }
   const tr = await storageGet('ms_trips'); if(tr) state.trips = JSON.parse(tr);
   const to_ = await storageGet('ms_tripof'); if(to_) state.tripOf = JSON.parse(to_);
+  const cba = await storageGet('ms_cashbackanchor'); if(cba){ try{ const v = JSON.parse(cba); if(v && typeof v.amount==='number') state.cashbackAnchor = v; }catch(e){} }
   const pr = await storageGet('ms_period'); if(pr){ try{ const v = JSON.parse(pr); if(v && v.preset) state.period = v; }catch(e){} }
   const sa = await storageGet('ms_selectedaccount'); if(sa) state.lastAccountId = sa;
   const cc = await storageGet('ms_customcats');
@@ -2489,6 +2491,19 @@ function buildCleanExpensesPanel(all, grossTotal, periodDays){
 // Cashback paid out to the card is taxed in Ukraine: 18% personal income tax + 5% military levy.
 const CASHBACK_TAX_RATE = 0.23;
 
+// She types the cashback the Monobank app shows; from now on only newer operations add to it.
+// An empty answer goes back to the automatic sum.
+async function setCashbackFromApp(){
+  const cur = state.cashbackAnchor ? String(state.cashbackAnchor.amount).replace('.',',') : '';
+  const ans = prompt('Скільки кешбеку зараз у застосунку Monobank (до податку)?\nПорожнє поле — рахувати автоматично.', cur);
+  if(ans===null) return;
+  const v = parseFloat(ans.replace(/\s/g,'').replace(',','.'));
+  if(ans.trim()==='') state.cashbackAnchor = null;
+  else if(isNaN(v) || v<0){ alert('Впиши суму числом, наприклад 250 або 250,40.'); return; }
+  else state.cashbackAnchor = {amount: Math.round(v*100)/100, time: Math.floor(Date.now()/1000)};
+  await storageSet('ms_cashbackanchor', JSON.stringify(state.cashbackAnchor));
+  render();
+}
 function buildBalancePanel(){
   const p = document.createElement('div');
   p.className='ms-panel';
@@ -2498,30 +2513,34 @@ function buildBalancePanel(){
   const acc = state.accounts.find(a=>a.id===state.selectedAccount);
   const currNames = {980:'UAH',978:'EUR',840:'USD',985:'PLN',946:'RON'};
   if(!acc){ p.innerHTML = ''; return p; }
-  // Cashback accumulated since the last "Виведення кешбеку" (cashback withdrawal) — what's
-  // actually sitting in Monobank now, independent of the selected period (when a new period
-  // starts a period-only sum would drop to almost zero). The API has no
-  // "accumulated cashback balance", only a per-operation `cashbackAmount`, so it's summed
-  // over every cached operation after the last withdrawal. Miles cards report miles, not money.
+  // Cashback sitting in Monobank now — not tied to the selected period or card. The API has no
+  // "cashback balance", only a per-operation `cashbackAmount`, and Monobank keeps ONE cashback
+  // for all of her cards, so it's summed over every card's cached operations since the last
+  // "Виведення кешбеку". When the cache doesn't reach that far back the sum is too small —
+  // then she types the real amount from the Monobank app once (state.cashbackAnchor), and
+  // only cashback of later operations is added on top of it.
   let cashbackPill = '';
   if(acc.cashbackType !== 'Miles'){
     const isWithdrawal = it => /виведення кешбеку|cashback withdrawal/i.test(it.description||'');
-    const cardCache = accCache();
-    const lastW = cardCache.filter(isWithdrawal).reduce((m,it)=>it.time>m?it.time:m, 0);
-    const accCb = cardCache.filter(it=>it.time>lastW).reduce((sum,it)=>sum+(it.cashbackAmount||0)/100,0);
+    const allCache = state.txCache;
+    const lastW = allCache.filter(isWithdrawal).reduce((m,it)=>it.time>m?it.time:m, 0);
+    const anchor = state.cashbackAnchor && state.cashbackAnchor.time > lastW ? state.cashbackAnchor : null;
+    const since = anchor ? anchor.time : lastW;
+    const accCb = (anchor ? anchor.amount : 0) + allCache.filter(it=>it.time>since).reduce((sum,it)=>sum+(it.cashbackAmount||0)/100,0);
     const periodCb = state.txs.reduce((sum,t)=>sum+(t.cashback||0),0);
-    if(accCb > 0.004){
+    if(accCb > 0.004 || anchor){
       const netCb = accCb * (1 - CASHBACK_TAX_RATE);
       const taxPct = Math.round(CASHBACK_TAX_RATE*100);
-      const sinceLabel = lastW ? new Date(lastW*1000).toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'}) : '';
-      const tip = `Кешбек, накопичений ${lastW ? 'з останнього виведення ('+sinceLabel+')' : 'за всі завантажені операції'}: ${fmt(accCb)} ${curSym()}. Після податку ${taxPct}%: ${fmt(netCb)} ${curSym()}. За обраний період: ${fmt(periodCb)} ${curSym()}.`;
-      cashbackPill = `<div class="ms-bc-cashback" title="${tip}">
+      const sinceLabel = since ? new Date(since*1000).toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'}) : '';
+      const basis = anchor ? `вписано вручну ${sinceLabel} + нові покупки` : lastW ? 'з останнього виведення ('+sinceLabel+')' : 'за всі завантажені операції';
+      const tip = `Кешбек ${basis}: ${fmt(accCb)} ${curSym()}. Після податку ${taxPct}%: ${fmt(netCb)} ${curSym()}. За обраний період: ${fmt(periodCb)} ${curSym()}. Не збігається з Monobank? Натисни і впиши точну суму.`;
+      cashbackPill = `<button type="button" class="ms-bc-cashback" id="cashbackBtn" title="${tip}" aria-label="Кешбек ${fmt(accCb)} ${curSym()}. Змінити суму">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v4h-4"/><path d="M9.5 9.5h3.2a1.6 1.6 0 0 1 0 3.2h-1.4a1.6 1.6 0 0 0 0 3.2h3.2M12 8v1.5M12 15.9v1.6"/></svg>
           <span>+${fmt(accCb)} ${curSym()}</span>
-          <small>кешбек${lastW ? ' з '+sinceLabel : ''}</small>
+          <small>кешбек</small>
           <span class="ms-bc-cb-net">−${taxPct}% → ${fmt(netCb)} ${curSym()}</span>
           <small>на карту</small>
-        </div>`;
+        </button>`;
     }
   }
   p.innerHTML = `
@@ -2544,6 +2563,7 @@ function buildBalancePanel(){
       </div>
     </div>
   `;
+  p.querySelector('#cashbackBtn')?.addEventListener('click', setCashbackFromApp);
   return p;
 }
 
