@@ -196,7 +196,7 @@
   }
   .ms-legend-row-clickable{cursor:pointer;}
   .ms-legend-row-clickable:hover{background:var(--panel-hi);}
-  .ms-legend-chevron{width:12px;color:var(--muted);font-size:10px;flex-shrink:0;}
+  .ms-legend-chevron{width:18px;color:var(--text);flex-shrink:0;display:inline-flex;}
   .ms-legend-detail{background:var(--bg);border-radius:8px;padding:4px 10px;margin:2px 0 8px;}
   .ms-store-breakdown-title{font-size:11px;font-weight:600;color:var(--muted);padding:7px 0 3px;text-transform:uppercase;letter-spacing:.04em;}
   .ms-store-breakdown-row{display:flex;justify-content:space-between;gap:12px;padding:5px 0;border-bottom:1px solid var(--line);font-size:12px;}
@@ -366,7 +366,7 @@
     background:var(--bg);flex-wrap:wrap;
   }
   .ms-trip-head:hover{background:var(--panel-hi);}
-  .ms-trip-chevron{color:var(--muted);font-size:11px;width:12px;}
+  .ms-trip-chevron{color:var(--text);width:18px;display:inline-flex;flex-shrink:0;}
   .ms-trip-name{font-weight:600;font-size:14px;flex:1;min-width:120px;}
   .ms-trip-meta{color:var(--muted);font-size:11.5px;}
   .ms-trip-sum{font-family:var(--font-mono);color:var(--gold);font-weight:600;font-size:14px;}
@@ -385,7 +385,8 @@
   .ms-trip-category-name{font-size:12px;color:var(--muted);overflow-wrap:anywhere;}
   .ms-trip-category-amount{font-family:var(--font-mono);font-size:17px;color:var(--text);}
   .ms-trip-category-track{display:block;height:5px;width:100%;margin-top:4px;border-radius:99px;background:var(--trip-category-color);}
-  .ms-trip-category-hint{font-size:10px;color:var(--gold);}
+  .ms-trip-category-hint{font-size:11px;color:var(--gold);display:inline-flex;align-items:center;gap:2px;}
+  .ms-trip-category-hint .ms-chev{width:13px;height:13px;}
   .ms-trip-category-transactions{width:100%;margin-top:8px;padding-top:6px;border-top:1px solid var(--line);}
   .ms-trip-category-transaction{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 8px;padding:6px 0;border-bottom:1px solid var(--line);font-size:10px;line-height:1.4;}
   .ms-trip-category-transaction.is-refund{grid-template-columns:minmax(0,1fr) auto auto;align-items:center;}
@@ -479,11 +480,16 @@
   /* Every dropdown: a clearly visible chevron instead of the tiny native arrow */
   .ms-root select:not([multiple]){
     -webkit-appearance:none;appearance:none;cursor:pointer;
-    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238C6D3F' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
-    background-repeat:no-repeat;background-position:right 8px center;background-size:16px 16px;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234A3623' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat:no-repeat;background-position:right 8px center;background-size:18px 18px;
     padding-right:32px !important;
   }
   .ms-root select:not([multiple]):hover{border-color:var(--gold);}
+  /* chevron of unfolding rows/buttons (chev() in app.js) */
+  .ms-chev{flex-shrink:0;vertical-align:-3px;transition:transform .15s;}
+  .ms-chev.is-open{transform:rotate(180deg);}
+  .ms-btn .ms-chev, .ms-link-btn .ms-chev{margin-left:4px;}
+  .ms-link-btn{display:inline-flex;align-items:center;}
   .ms-tab:disabled{opacity:.45 !important;cursor:not-allowed;}
   .ms-tab:disabled:hover{background:rgba(0,0,0,.08);border-color:rgba(0,0,0,.18);}
 
@@ -586,6 +592,10 @@
   .ms-eye:focus-visible{outline:2px solid var(--gold);outline-offset:1px;}
   .ms-panel.is-collapsed{align-self:start;}
   .ms-panel.is-collapsed h2{margin:0;}
+  /* "Скільки можна витрачати на день": money picture in the bottom-right corner */
+  .ms-results .ms-panel.ms-budget:not(.is-collapsed){background-image:url("../img/money.svg");background-repeat:no-repeat;
+    background-position:right 14px bottom 14px;background-size:130px auto;min-height:190px;}
+  @media (max-width:760px){ .ms-results .ms-panel.ms-budget:not(.is-collapsed){background-size:96px auto;} }
 
   /* ⟳ refresh without reloading the page, next to "Оновлено о …" */
   .ms-refresh-note{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:6px 0 0;min-height:32px;}

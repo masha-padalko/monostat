@@ -1550,6 +1550,10 @@ function accountsPanel(){
   return p;
 }
 
+// One clear chevron for everything that unfolds: points down when closed, up when open.
+function chev(open){
+  return `<svg class="ms-chev${open?' is-open':''}" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>`;
+}
 // Marks an operation she typed in herself (cash etc.), not one from Monobank.
 const MANUAL_BADGE = `<span class="ms-manual" title="Внесено вручну" aria-label="Внесено вручну" role="img"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg></span>`;
 const CALENDAR_ICON = `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="4"/><path d="M8 3v4M16 3v4M3.5 10h17"/></svg>`;
@@ -1604,7 +1608,7 @@ function rangePanel(){
   p.innerHTML = `
     <div class="ms-rangebar-top"></div>
     ${IS_DEMO ? '' : `<div class="ms-hint ms-refresh-note" id="refreshNote" aria-live="polite">${refreshNoteHtml()}</div>`}
-    ${canSwitch ? `<button class="ms-link-btn" id="cardPickerBtn" aria-expanded="${state.cardPickerOpen}">Інша картка ${state.cardPickerOpen?'▴':'▾'}</button>` : ''}
+    ${canSwitch ? `<button class="ms-link-btn" id="cardPickerBtn" aria-expanded="${state.cardPickerOpen}">Інша картка ${chev(state.cardPickerOpen)}</button>` : ''}
     ${canSwitch && state.cardPickerOpen ? '<div class="ms-accounts" id="cardPickerList" style="margin-top:8px"></div>' : ''}
   `;
   p.querySelector('.ms-rangebar-top').appendChild(periodPicker());
@@ -1900,7 +1904,7 @@ function resultsPanel(){
     const isTransfers = cat===TRANSFERS_CAT;
     const pct = isTransfers ? '' : (cleanTotal ? ((Math.abs(sum)/Math.abs(cleanTotal))*100).toFixed(1)+'%' : '0.0%');
     const expanded = !!state.expandedCats[cat];
-    row.innerHTML = `<span class="ms-legend-chevron">${expanded?'▾':'▸'}</span>
+    row.innerHTML = `<span class="ms-legend-chevron">${chev(expanded)}</span>
       <span class="ms-dot" style="background:${COLORS[cat]||'#666'}"></span>
       <span class="ms-legend-icon">${ICONS[cat]||'❓'}</span>
       <span class="ms-legend-cat">${cat}</span>
@@ -2115,7 +2119,7 @@ function resultsPanel(){
     moreBtn.className = 'ms-btn secondary';
     moreBtn.style.width = '100%';
     moreBtn.style.marginTop = '10px';
-    moreBtn.textContent = `Показати ще ${txRows.length - TX_PREVIEW_COUNT} ▾`;
+    moreBtn.innerHTML = `Показати ще ${txRows.length - TX_PREVIEW_COUNT} ${chev(false)}`;
     moreBtn.addEventListener('click', ()=>{ state.expandedBlocks.transactions = true; render(); });
     panel2.appendChild(moreBtn);
     txToggleBtn = moreBtn;
@@ -2124,7 +2128,7 @@ function resultsPanel(){
     lessBtn.className = 'ms-btn secondary';
     lessBtn.style.width = '100%';
     lessBtn.style.marginTop = '10px';
-    lessBtn.textContent = 'Згорнути ▴';
+    lessBtn.innerHTML = `Згорнути ${chev(true)}`;
     lessBtn.addEventListener('click', ()=>{ state.expandedBlocks.transactions = false; render(); });
     panel2.appendChild(lessBtn);
     txToggleBtn = lessBtn;
@@ -2668,6 +2672,7 @@ function buildDailyBudgetPanel(all){
     ` : ''}
   `;
   p.classList.toggle('is-collapsed', !state.jarEnabled); // hidden: only the title with the eye
+  p.classList.add('ms-budget'); // money picture in the bottom-right corner (css)
   p.querySelector('#jarEnabledBtn').addEventListener('click', async ()=>{
     state.jarEnabled = !state.jarEnabled;
     await storageSet('ms_jarenabled', String(state.jarEnabled));
@@ -2715,7 +2720,7 @@ function buildIncomingPanel(){
     toggleBtn.className = 'ms-btn secondary';
     toggleBtn.style.width = '100%';
     toggleBtn.style.marginTop = '10px';
-    toggleBtn.textContent = state.expandedBlocks.incoming ? 'Згорнути ▴' : `Показати ще ${sortedExternal.length - INC_PREVIEW_COUNT} ▾`;
+    toggleBtn.innerHTML = state.expandedBlocks.incoming ? `Згорнути ${chev(true)}` : `Показати ще ${sortedExternal.length - INC_PREVIEW_COUNT} ${chev(false)}`;
     toggleBtn.addEventListener('click', ()=>{ state.expandedBlocks.incoming = !state.expandedBlocks.incoming; render(); });
     extList.insertAdjacentElement('afterend', toggleBtn);
   }
@@ -3145,7 +3150,15 @@ function buildTripsPanel(all){
   const charges = chargesByMerchant(allRaw);
   const refundTrip = new Map();
   allRaw.forEach(t=>{ if(isRefundTx(t)) refundTrip.set(t, refundTripId(t, charges)); });
-  state.trips.forEach(trip=>{
+  // newest trip on top: by its end date, or by its latest operation, or (no dates yet) newest created
+  const lastDay = new Map();
+  all.forEach(t=>{ const id = tripIdFor(t); if(!id) return; const d = todayStr(t.date instanceof Date ? t.date : new Date(t.date)); if(!lastDay.has(id) || d > lastDay.get(id)) lastDay.set(id, d); });
+  const tripKey = tr => tr.dateTo || lastDay.get(tr.id) || '9999'; // a fresh empty trip is the one she is filling now
+  const tripsSorted = state.trips.map((tr,i)=>({tr,i})).sort((x,y)=>{
+    const a = tripKey(x.tr), b = tripKey(y.tr);
+    return a===b ? y.i - x.i : (a < b ? 1 : -1);
+  }).map(x=>x.tr);
+  tripsSorted.forEach(trip=>{
     const txs = all.filter(t=>tripIdFor(t)===trip.id);
     const expanded = !!state.expandedTrips?.[trip.id];
 
@@ -3194,7 +3207,7 @@ function buildTripsPanel(all){
     const head = document.createElement('div');
     head.className = 'ms-trip-head';
     head.innerHTML = `
-      <span class="ms-trip-chevron">${expanded?'▾':'▸'}</span>
+      <span class="ms-trip-chevron">${chev(expanded)}</span>
       <span class="ms-trip-name">${escapeHtml(trip.name)}</span>
       ${dateRangeStr ? `<span class="ms-trip-meta">${dateRangeStr}${dayCount>1?' · <b style="color:var(--text)">'+dayCount+' дн.</b>':''}</span>` : ''}
       <span class="ms-trip-meta">${txs.length} оп.</span>
@@ -3298,7 +3311,7 @@ function buildTripsPanel(all){
             <span class="ms-trip-category-name">${escapeHtml(cat)}</span>
             <strong class="ms-trip-category-amount">${amount<0?'−':''}${fmt(amount)} ${curSym()}</strong>
             <span class="ms-trip-category-track" aria-hidden="true"></span>
-            <span class="ms-trip-category-hint">${categoryExpanded?'Згорнути':'Переглянути витрати'} ▾</span>
+            <span class="ms-trip-category-hint">${categoryExpanded?'Згорнути':'Переглянути витрати'} ${chev(categoryExpanded)}</span>
           `;
           const toggleCategory = ()=>{
             state.expandedTripCategories[categoryKey] = !categoryExpanded;
