@@ -563,7 +563,7 @@
   .ms-ov-general .ms-hero{flex-direction:row;align-items:flex-start;gap:28px;}
   .ms-ov-general .ms-legend{flex:1;min-width:0;}
   /* "Регулярні платежі" in the narrow column: name on one line, dates under it */
-  .ms-ov-recurring .ms-today-cat-row{flex-wrap:wrap;row-gap:2px;}
+  .ms-ov-recurring .ms-today-cat-row{flex-wrap:wrap;row-gap:2px;padding-left:12px;padding-right:12px;}
   .ms-ov-recurring .ms-rec-name{flex:1 1 100%;}
   .ms-ov-recurring .ms-rec-meta{font-size:11px;}
 
