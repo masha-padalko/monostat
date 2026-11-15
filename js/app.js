@@ -1096,7 +1096,9 @@ async function refreshInBackground(opts){
   const from = state.from, to = state.to;
   state.refresh = {status:'loading', msg:'', code:''};
   updateRefreshNote();
-  const [fromUnix, toUnix] = apiRange(from, to);
+  // A period that ended before today ("Минулий місяць", own dates) is already in the cache —
+  // ask for the newest 31 days instead, so today's purchases ("Сьогодні") are never missed.
+  const [fromUnix, toUnix] = to >= todayStr() ? apiRange(from, to) : apiRange(daysAgoStr(30), todayStr());
   const [infoRes, stRes] = await Promise.allSettled([
     info || skipInfo ? Promise.resolve(info||null) : fetchClientInfo(token),
     fetchStatement(token, account, fromUnix, toUnix)
@@ -1116,8 +1118,7 @@ async function refreshInBackground(opts){
       addSyncedRange(fromUnix, Math.min(toUnix, Math.floor(Date.now()/1000)), account);
     }
     if(stillSame){
-      if(items.length < 500) ingestTransactions(items);
-      else refreshCurrentView(); // response capped at 500 — show the cache, autoSync fetches the rest
+      refreshCurrentView(); // the period from the cache, which now has the fresh operations too
       await updateJarAccumulation();
     }
   }
