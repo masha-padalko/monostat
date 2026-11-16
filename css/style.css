@@ -512,8 +512,13 @@
   .ms-header-btn:hover{background:#A3742F;}
   .ms-header-btn:focus-visible{outline:2px solid var(--text);outline-offset:2px;}
 
-  .ms-hero-head{margin:0 0 18px;}
-  .ms-hero-head .ms-h1{font-size:clamp(26px,3.4vw,44px);line-height:1.12;letter-spacing:-.02em;font-weight:500;margin:0;
+  .ms-hero-head{margin:0 0 32px;display:flex;align-items:flex-end;justify-content:space-between;gap:16px 32px;}
+  .ms-hero-text{min-width:0;}
+  .ms-hero-side{flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-end;}
+  .ms-hero-side:empty{display:none;}
+  .ms-hero-side .ms-rangebar{margin:0;display:flex;flex-direction:column;align-items:flex-end;gap:2px;}
+  .ms-hero-side .ms-refresh-note{justify-content:flex-end;}
+  .ms-hero-head .ms-h1{font-size:clamp(30px,4.2vw,60px);line-height:1.12;letter-spacing:-.02em;font-weight:500;margin:0;
     max-width:30ch;text-wrap:balance;min-height:1.12em;}
   body[data-tab]:not([data-tab="overview"]) .ms-hero-head{display:none;}
 
@@ -526,15 +531,18 @@
 
   /* period picker: rounded pill "📅 1–13 лист. 2026 ⌄" */
   .ms-period{position:relative;display:inline-block;max-width:100%;}
-  .ms-period-btn{display:inline-flex;align-items:center;gap:14px;max-width:100%;padding:13px 20px;border:0;border-radius:999px;
-    background:var(--panel-hi);color:var(--text);font:inherit;font-size:16px;cursor:pointer;transition:background .15s;}
-  .ms-period-btn:hover{background:#EADFC8;}
+  .ms-period-btn{display:inline-flex;align-items:center;gap:14px;max-width:100%;padding:10px 18px 10px 10px;border:1px solid var(--line);border-radius:999px;
+    background:var(--panel);color:var(--text);font:inherit;cursor:pointer;transition:background .15s,border-color .15s;text-align:left;}
+  .ms-period-btn:hover{border-color:var(--gold);}
+  .ms-period-text{display:flex;flex-direction:column;min-width:0;line-height:1.15;}
+  .ms-period-cap{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);}
   .ms-period-btn:focus-visible{outline:2px solid var(--gold);outline-offset:2px;}
-  .ms-period-ic{display:inline-flex;color:var(--muted);}
-  .ms-period-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .ms-period-ic{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:50%;background:#EFDDB8;color:var(--gold);flex-shrink:0;}
+  .ms-period-label{font-size:21px;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .ms-period-chev{color:var(--muted);}
   .ms-period-chev{display:inline-flex;transition:transform .15s;}
   .ms-period-btn[aria-expanded="true"] .ms-period-chev{transform:rotate(180deg);}
-  .ms-period-menu{position:absolute;z-index:20;top:calc(100% + 6px);left:0;min-width:260px;padding:8px;border-radius:18px;
+  .ms-period-menu{position:absolute;z-index:20;top:calc(100% + 6px);right:0;min-width:280px;padding:8px;border-radius:18px;
     background:var(--panel);box-shadow:0 12px 32px rgba(74,54,35,.16);display:flex;flex-direction:column;gap:2px;}
   .ms-period-opt{border:0;background:none;text-align:left;padding:10px 12px;border-radius:12px;font:inherit;font-size:14px;color:var(--text);cursor:pointer;}
   .ms-period-opt:hover{background:var(--panel-hi);}
@@ -549,20 +557,27 @@
   .ms-manual{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;margin-left:6px;border-radius:50%;
     background:var(--panel-hi);color:var(--gold);vertical-align:-4px;}
 
-  .ms-overview{display:grid;grid-template-columns:minmax(0,2fr) minmax(300px,1fr);gap:14px;align-items:start;}
+  /* right column ("Сьогодні / Вчора") about 1.5x as wide as before; left one narrower */
+  .ms-overview{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(320px,1fr);gap:14px;align-items:start;}
   .ms-ov-main,.ms-ov-side{display:flex;flex-direction:column;gap:14px;min-width:0;}
-  /* card at 70% of its former size (was 1.25fr of 2.25); "per day" next to it at the card's height */
-  .ms-ov-cardrow{display:grid;grid-template-columns:minmax(0,.875fr) minmax(0,1.375fr);gap:14px;align-items:stretch;}
+  /* card keeps its size; "per day" next to it at the card's height */
+  .ms-ov-cardrow{display:grid;grid-template-columns:minmax(0,360px) minmax(0,1fr);gap:14px;align-items:stretch;}
+  @media (max-width:1280px) and (min-width:1001px){
+    .ms-ov-cardrow{grid-template-columns:minmax(0,1fr);}
+    .ms-ov-cardrow .ms-ov-card .ms-balance-card{max-width:360px;}
+  }
   .ms-ov-cardrow > *{min-width:0;}
   .ms-overview .ms-panel{margin-bottom:0;}
   .ms-ov-card .ms-balance-card{max-width:none;min-height:0;padding:16px 18px;border-radius:16px;}
-  .ms-ov-card .ms-bc-amount{font-size:24px;}
-  .ms-ov-card .ms-bc-eur{font-size:11px;}
-  .ms-ov-card .ms-bc-sub{font-size:10.5px;margin-top:4px;}
+  .ms-ov-card .ms-bc-title{font-size:18px;}
+  .ms-ov-card .ms-bc-cur{font-size:15px;}
+  .ms-ov-card .ms-bc-amount{font-size:28px;}
+  .ms-ov-card .ms-bc-eur{font-size:14px;}
+  .ms-ov-card .ms-bc-sub{font-size:13.5px;margin-top:4px;}
   .ms-ov-card .ms-bc-chip{transform:scale(.8);transform-origin:left center;}
   .ms-ov-card .ms-bc-nfc{width:21px;height:21px;}
   .ms-ov-card .ms-bc-cashback{padding:6px 9px;border-radius:11px;}
-  .ms-ov-card .ms-bc-cashback .ms-bc-cb-net{font-size:13px;}
+  .ms-ov-card .ms-bc-cashback .ms-bc-cb-net{font-size:16px;}
   .ms-ov-budget{padding:16px 18px !important;}
   .ms-ov-budget h2{margin-bottom:4px;}
   .ms-ov-budget .ms-field{margin-bottom:8px !important;}
@@ -579,7 +594,7 @@
     .ms-overview{display:flex;flex-direction:column;align-items:stretch;}
     .ms-ov-general .ms-hero{flex-direction:column;align-items:center;}
     .ms-ov-main,.ms-ov-side,.ms-ov-cardrow{display:contents;}
-    .ms-ov-card{order:1;} .ms-ov-range{order:2;} .ms-ov-budget{order:3;} .ms-ov-today{order:4;} .ms-ov-general{order:5;} .ms-ov-ops{order:6;} .ms-ov-recurring{order:7;}
+    .ms-ov-card{order:1;} .ms-ov-budget{order:3;} .ms-ov-today{order:4;} .ms-ov-general{order:5;} .ms-ov-ops{order:6;} .ms-ov-recurring{order:7;}
     .ms-ov-card .ms-balance-card{max-width:440px;height:auto;aspect-ratio:auto;}
   }
   @media (max-width:760px){
@@ -589,7 +604,11 @@
     .ms-header-email,.ms-topbar .ms-avatar{display:none;}
     .ms-logo{font-size:21px;gap:8px;}
     .ms-logo-mark{width:22px;height:22px;}
-    .ms-hero-head{margin-bottom:14px;}
+    .ms-hero-head{margin-bottom:20px;flex-direction:column;align-items:stretch;}
+    .ms-hero-side,.ms-hero-side .ms-rangebar{align-items:flex-start;}
+    .ms-hero-side .ms-refresh-note{justify-content:flex-start;}
+    .ms-period-menu{right:auto;left:0;}
+    .ms-period-label{font-size:18px;}
   }
 
   /* show/hide eye in a block title (like password fields) */
@@ -620,3 +639,28 @@
   .ms-hs-filter-btn:focus-visible{outline:2px solid var(--gold);outline-offset:2px;}
   .ms-hs-filter-btn.has-active::after{content:'';position:absolute;top:6px;right:6px;width:7px;height:7px;border-radius:50%;background:var(--gold);}
   .ms-hs-filters[hidden]{display:none;}
+
+  /* round icon button (sign out, "+" manual entry) — same look as the eye/refresh icons */
+  .ms-icon-round{flex:0 0 auto;width:34px;height:34px;border:1px solid var(--line);border-radius:50%;background:transparent;color:var(--muted);
+    display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0;transition:color .15s,border-color .15s,background .15s;}
+  .ms-icon-round:hover,.ms-icon-round[aria-expanded="true"]{color:var(--gold);border-color:var(--gold);}
+  .ms-icon-round:focus-visible{outline:2px solid var(--gold);outline-offset:2px;}
+  .ms-avatar:focus-visible{outline:2px solid var(--gold);outline-offset:2px;}
+  .ms-avatar{cursor:default;}
+
+  /* "Всі операції": chosen period next to the title, "+" on the right, manual entry folds out */
+  .ms-h2-period{font-family:var(--font-body);font-size:13px;color:var(--muted);font-weight:400;}
+  .ms-results .ms-panel h2 #manualToggle{margin-left:auto;order:2;}
+  .ms-ops-manual{margin:0 0 14px;padding:14px;border-radius:14px;background:var(--bg);}
+  .ms-ops-manual[hidden]{display:none;}
+  .ms-ops-manual-title{font-size:13px;font-weight:600;color:var(--text);}
+  .ms-ops-manual .ms-manual-form{margin-top:8px;}
+
+  /* ✕ inside search fields, only while there is text */
+  .ms-search-box{position:relative;display:block;}
+  .ms-search-box input{width:100%;padding-right:36px !important;}
+  .ms-search-clear{position:absolute;right:6px;top:50%;transform:translateY(-50%);width:26px;height:26px;border:0;border-radius:50%;
+    background:transparent;color:var(--muted);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0;}
+  .ms-search-clear:hover{background:var(--panel-hi);color:var(--text);}
+  .ms-search-clear:focus-visible{outline:2px solid var(--gold);}
+  .ms-search-clear[hidden]{display:none;}

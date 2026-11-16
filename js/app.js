@@ -173,7 +173,7 @@ let state = {
   expandedCats: {},
   expandedBlocks: {transactions:false, incoming:false}, // accordion-style "show more" for the 3-col panels
   notes: {...window.MonoStatDefaults.DEFAULT_NOTES},         // txKey -> free-text note about that specific transaction
-  mainTab: (function(){ try{ const h=(location.hash||'').slice(1); return ['overview','history','trips','ops','data'].includes(h)?h:'overview'; }catch(e){ return 'overview'; } })(),
+  mainTab: (function(){ try{ const h=(location.hash||'').slice(1); return ['overview','history','trips','data'].includes(h)?h:'overview'; }catch(e){ return 'overview'; } })(),
   dayExcluded: {...window.MonoStatDefaults.DEFAULT_DAY_EXCLUDED},     // txKey -> true if unchecked in "Зараз" (excluded from today/yesterday total)
   notExpense: {...window.MonoStatDefaults.DEFAULT_NOT_EXPENSE},       // txKey -> true — flagged as "not a real expense" (refunded/recharged, fund contribution, etc.) for "Чисті трати"
   syncedByAcc: {},       // accountId -> [[fromUnix,toUnix],...] — periods already fetched/imported completely FOR THAT CARD, so gap detection doesn't re-request them
@@ -1365,6 +1365,8 @@ function render(){
   frequentCatsMemo = null; // categories may have changed since the last render
   const navSlot = document.getElementById('ms-nav-slot');
   if(navSlot) navSlot.innerHTML = '';     // resultsPanel() puts the tabs back when the dashboard is shown
+  const heroSlot = document.getElementById('ms-hero-slot');
+  if(heroSlot) heroSlot.innerHTML = '';   // ...and the period picker next to the heading
   delete document.body.dataset.tab;
   if(IS_DEMO){
     if(state.step!=='results') return;
@@ -1455,10 +1457,13 @@ function updateSignOutSlot(){
   if(!slot) return;
   if(!authUserId){ slot.innerHTML = ''; return; }
   const initial = (authUserEmail||'?').trim()[0]?.toUpperCase() || '?';
+  // email only as a tooltip on the avatar; sign-out is an icon like the rest of the header
+  const email = escapeHtml(authUserEmail||'');
   slot.innerHTML = `
-    <span class="ms-header-email">${escapeHtml(authUserEmail||'')}</span>
-    <div class="ms-avatar" title="Профіль (фото — пізніше)">${initial}</div>
-    <button class="ms-btn secondary" id="signOutBtn">Вийти</button>
+    <div class="ms-avatar" tabindex="0" title="${email}" aria-label="Акаунт: ${email}">${initial}</div>
+    <button type="button" class="ms-icon-round" id="signOutBtn" title="Вийти" aria-label="Вийти">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3"/><path d="M15 8l4 4-4 4"/><path d="M19 12H9"/></svg>
+    </button>
   `;
   const signOutBtn = slot.querySelector('#signOutBtn');
   if(signOutBtn) signOutBtn.addEventListener('click', async ()=>{ await signOutAuth(); render(); });
@@ -1571,7 +1576,7 @@ function periodPicker(){
   wrap.innerHTML = `
     <button type="button" class="ms-period-btn" id="periodBtn" aria-expanded="${state.periodOpen}" aria-haspopup="true">
       <span class="ms-period-ic">${CALENDAR_ICON}</span>
-      <span class="ms-period-label">${periodLabel(state.from, state.to)}</span>
+      <span class="ms-period-text"><span class="ms-period-cap">Період</span><span class="ms-period-label">${periodLabel(state.from, state.to)}</span></span>
       <span class="ms-period-chev">${CHEVRON_ICON}</span>
     </button>
     ${state.periodOpen ? `<div class="ms-period-menu" role="menu">
@@ -1764,7 +1769,6 @@ const MAIN_TABS = [
   {id:'overview', icon:'📊', label:'Огляд'},
   {id:'history',  icon:'🔎', label:'Пошук по історії'},
   {id:'trips',    icon:'✈️', label:'Подорожі та події'},
-  {id:'ops',      icon:'🧾', label:'Операції за місяць'},
   {id:'data',     icon:'💾', label:'Дані та імпорт'},
 ];
 function resultsPanel(){
@@ -1916,11 +1920,14 @@ function resultsPanel(){
 
   const panel2 = document.createElement('div');
   panel2.className='ms-panel';
-  panel2.innerHTML = `<h2>Всі операції</h2><p class="ms-hint">Натисни на операцію, щоб змінити категорію (запам'ятається для цього мерчанта), прив'язати її до поїздки, позначити як «не витрата», вказати свою частку або додати нотатку.</p>
+  panel2.innerHTML = `<h2>Всі операції <span class="ms-h2-period">${periodLabel(state.from, state.to)}</span>
+      <button type="button" class="ms-icon-round" id="manualToggle" aria-expanded="${!!state.manualFormOpen}" aria-controls="manualForm" title="Додати витрату вручну" aria-label="Додати витрату вручну">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+      </button></h2><p class="ms-hint">Натисни на операцію, щоб змінити категорію (запам'ятається для цього мерчанта), прив'язати її до поїздки, позначити як «не витрата», вказати свою частку або додати нотатку.</p>
     <div class="ms-field" style="margin-bottom:10px">
-      <input type="text" id="txSearchInput" placeholder="Пошук за описом або власною нотаткою…" value="${escapeHtml(state.txSearchQuery||'')}">
+      <input type="text" class="ms-search-input" id="txSearchInput" placeholder="Пошук за описом або власною нотаткою…" value="${escapeHtml(state.txSearchQuery||'')}">
     </div>
-    <div style="font-size:13px;color:var(--muted);margin-bottom:12px" id="txSearchSummary">Разом витрачено: <b style="color:var(--gold);font-family:var(--font-mono)">${fmt(total)} ${curSym()}</b>${fmtEur(total, curCode())} · ${all.length} операцій</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:12px" id="txSearchSummary"></div>
     <div class="ms-txlist" id="txBody"></div>`;
   const tbody = panel2.querySelector('#txBody');
   const todayK = todayStr(), yestK = daysAgoStr(1);
@@ -2104,7 +2111,7 @@ function resultsPanel(){
       txRows.forEach((r,i)=>{ r.style.display = (i<TX_PREVIEW_COUNT || state.expandedBlocks.transactions) ? '' : 'none'; });
       syncDayHeaders();
       if(txToggleBtn) txToggleBtn.style.display = '';
-      txSearchSummary.innerHTML = `Разом витрачено: <b style="color:var(--gold);font-family:var(--font-mono)">${fmt(total)} ${curSym()}</b>${fmtEur(total, curCode())} · ${all.length} операцій`;
+      txSearchSummary.innerHTML = ''; // the total is already on the donut
       return;
     }
     let matchCount = 0;
@@ -2118,11 +2125,14 @@ function resultsPanel(){
     txSearchSummary.innerHTML = `Знайдено: <b style="color:var(--gold);font-family:var(--font-mono)">${matchCount}</b> з ${all.length} операцій`;
   });
 
+  // manual cash entry — folds out inside "Всі операції" from the + in its title
   const panel3 = document.createElement('div');
-  panel3.className='ms-panel';
+  panel3.className='ms-ops-manual';
+  panel3.id = 'manualForm';
+  panel3.hidden = !state.manualFormOpen;
   const MANUAL_CURRENCIES = [{code:980,label:'₴ UAH'},{code:978,label:'€ EUR'},{code:840,label:'$ USD'},{code:985,label:'zł PLN'},{code:946,label:'lei RON'},{code:981,label:'₾ GEL'}];
   panel3.innerHTML = `
-    <h2>Додати готівкову витрату вручну</h2>
+    <div class="ms-ops-manual-title">Додати готівкову витрату вручну</div>
     <div class="ms-manual-form">
       <div class="ms-field" style="max-width:140px"><label>Дата</label><input type="date" id="mDate" value="${todayStr()}"></div>
       <div class="ms-field" style="flex:2"><label>Опис</label><input type="text" id="mDesc" placeholder="Наприклад: канцтовари"></div>
@@ -2157,6 +2167,13 @@ function resultsPanel(){
     panel3.querySelector('#mDesc').value = '';
     panel3.querySelector('#mAmount').value = '';
     render();
+  });
+  panel2.querySelector('.ms-field').before(panel3);
+  panel2.querySelector('#manualToggle').addEventListener('click', e=>{
+    state.manualFormOpen = !state.manualFormOpen;
+    panel3.hidden = !state.manualFormOpen;
+    e.currentTarget.setAttribute('aria-expanded', String(state.manualFormOpen));
+    if(state.manualFormOpen) panel3.querySelector('#mDesc').focus();
   });
 
   const tabs = MAIN_TABS;
@@ -2210,7 +2227,8 @@ function resultsPanel(){
   if(tab==='overview'){
 
     // left: bank card (right under the heading) + "how much per day" side by side,
-    // "Загальна картина" under them; right: period, "Зараз" (today/yesterday), "Регулярні платежі".
+    // "Загальна картина" and "Всі операції" under them; right: "Зараз" (today/yesterday), "Регулярні платежі".
+    // The period picker sits to the right of the page heading.
     // On a phone it's one column: card, period, per day, Зараз, Загальна картина, Всі операції, Регулярні платежі.
     const panelRecurring = buildRecurringPaymentsPanel();
     const overview = document.createElement('div');
@@ -2229,11 +2247,12 @@ function resultsPanel(){
     cardRow.appendChild(panelDailyBudget);
     main.appendChild(cardRow);
     main.appendChild(panel1);
-    panel2.classList.add('ms-ov-ops'); // "Всі операції" of the chosen period, same list as on its tab
+    panel2.classList.add('ms-ov-ops'); // "Всі операції" of the chosen period (+ manual entry)
     main.appendChild(panel2);
     const side = document.createElement('div');
     side.className = 'ms-ov-side';
-    side.appendChild(panelRange);
+    const heroSlot = document.getElementById('ms-hero-slot');
+    if(heroSlot) heroSlot.appendChild(panelRange); else side.appendChild(panelRange);
     side.appendChild(panelToday);
     if(!panelRecurring.hidden) side.appendChild(panelRecurring);
     overview.appendChild(main);
@@ -2243,14 +2262,6 @@ function resultsPanel(){
     wrap.appendChild(gap(buildHistorySearchPanel()));
   }else if(tab==='trips'){
     wrap.appendChild(buildTripsPanel(getAllHistoricalExpenses()));
-  }else if(tab==='ops'){
-    gap(panelRange); wrap.appendChild(panelRange);
-    const threeCol = document.createElement('div');
-    threeCol.className = 'ms-grid ms-grid-2-1';
-    threeCol.appendChild(panel2);
-    threeCol.appendChild(buildIncomingPanel());
-    gap(threeCol); wrap.appendChild(threeCol);
-    wrap.appendChild(gap(panel3));
   }else if(tab==='data'){
     const bottomRow = document.createElement('div');
     bottomRow.className = 'ms-grid';
@@ -2261,7 +2272,34 @@ function resultsPanel(){
 
   p.appendChild(wrap);
   collapseHints(wrap);
+  addSearchClear(wrap);
   return p;
+}
+
+// A ✕ inside every search field, shown only while it has text: clears it and re-runs the
+// search through the field's own 'input' handler.
+function addSearchClear(root){
+  root.querySelectorAll('input.ms-search-input').forEach(input=>{
+    const box = document.createElement('span');
+    box.className = 'ms-search-box';
+    input.replaceWith(box);
+    box.appendChild(input);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ms-search-clear';
+    btn.title = 'Очистити';
+    btn.setAttribute('aria-label','Очистити пошук');
+    btn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+    const sync = ()=>{ btn.hidden = !input.value; };
+    input.addEventListener('input', sync);
+    btn.addEventListener('click', ()=>{
+      input.value = '';
+      input.dispatchEvent(new Event('input', {bubbles:true}));
+      input.focus();
+    });
+    box.appendChild(btn);
+    sync();
+  });
 }
 
 // Minimal look: the explanatory paragraph right under a block's title becomes a small ⓘ
@@ -2646,55 +2684,6 @@ function buildDailyBudgetPanel(all){
   return p;
 }
 
-function buildIncomingPanel(){
-  const p = document.createElement('div');
-  p.className='ms-panel';
-
-  const incoming = getActiveRawTxs().filter(t=>t.amount>0);
-  const external = incoming.filter(t=>!INCOMING_SELF_KEYWORDS.some(k=>t.desc.includes(k)));
-  const internal = incoming.filter(t=>INCOMING_SELF_KEYWORDS.some(k=>t.desc.includes(k)));
-  const totalExternal = external.reduce((s,t)=>s+t.amount,0);
-
-  p.innerHTML = `<h2>Надходження</h2><p class="ms-hint">Гроші, які прийшли на картку за обраний період.</p>
-    <div style="font-size:13px;color:var(--muted);margin-bottom:12px">Разом надійшло: <b style="color:var(--teal);font-family:var(--font-mono)">${fmt(totalExternal)} ${curSym()}</b> · ${external.length} надходжень</div>
-    <div id="incExtList"></div>
-    ${internal.length ? `<div class="ms-today-breakdown-lbl" style="margin-top:14px">Внутрішні перекази (не рахуються надходженням)</div><div id="incIntList"></div>` : ''}
-  `;
-  const extList = p.querySelector('#incExtList');
-  if(external.length===0) extList.innerHTML = '<p class="ms-hint" style="margin:0">За цей період надходжень не було.</p>';
-  const sortedExternal = external.sort((a,b)=>b.date-a.date);
-  const INC_PREVIEW_COUNT = 6;
-  const visibleExternal = state.expandedBlocks.incoming ? sortedExternal : sortedExternal.slice(0, INC_PREVIEW_COUNT);
-  visibleExternal.forEach(t=>{
-    const row = document.createElement('div');
-    row.className='ms-inc-row';
-    const dateStr = dtStr(t.date);
-    row.innerHTML = `<span style="min-width:44px">${dateStr}</span><span style="flex:1">${escapeHtml(t.desc)}</span><span class="ms-amt-pos">+${fmt(t.amount)} ${curSym()}</span>`;
-    extList.appendChild(row);
-  });
-  if(sortedExternal.length > INC_PREVIEW_COUNT){
-    const toggleBtn = document.createElement('button');
-    toggleBtn.className = 'ms-btn secondary';
-    toggleBtn.style.width = '100%';
-    toggleBtn.style.marginTop = '10px';
-    toggleBtn.innerHTML = state.expandedBlocks.incoming ? `Згорнути ${chev(true)}` : `Показати ще ${sortedExternal.length - INC_PREVIEW_COUNT} ${chev(false)}`;
-    toggleBtn.addEventListener('click', ()=>{ state.expandedBlocks.incoming = !state.expandedBlocks.incoming; render(); });
-    extList.insertAdjacentElement('afterend', toggleBtn);
-  }
-  const intList = p.querySelector('#incIntList');
-  if(intList){
-    internal.sort((a,b)=>b.date-a.date).forEach(t=>{
-      const row = document.createElement('div');
-      row.className='ms-inc-row';
-      row.style.opacity='.6';
-      const dateStr = dtStr(t.date);
-      row.innerHTML = `<span style="min-width:44px">${dateStr}</span><span style="flex:1">${escapeHtml(t.desc)}</span><span class="ms-amt-pos">+${fmt(t.amount)} ${curSym()}</span>`;
-      intList.appendChild(row);
-    });
-  }
-  return p;
-}
-
 // ---------- History completeness: gap detection, auto-sync and CSV import ----------
 // Why this exists: a statement is only fetched for the exact dates she picks, so days between
 // two separate loads were silently missing (e.g. 02–09 Oct). Now the app (a) remembers which
@@ -3012,7 +3001,7 @@ function buildHistorySearchPanel(){
   p.innerHTML = `<h2>Пошук по всій історії</h2>
     <p class="ms-hint">Шукає серед усіх ${accCache().length} операцій цієї картки в кеші (усі роки, що завантажені або імпортовані з CSV), незалежно від вибраного періоду. Кілька слів — шукає всі одразу: назва магазину, нотатка, коментар з банку, категорія або частина номера картки (наприклад, «5354»).</p>
     <div class="ms-hs-search">
-      <div class="ms-field"><input type="text" id="hsQ" placeholder="Наприклад: nike, кросівки, 5354, подарунок…" value="${escapeHtml(hs.q)}" aria-label="Пошук"></div>
+      <div class="ms-field"><input type="text" class="ms-search-input" id="hsQ" placeholder="Наприклад: nike, кросівки, 5354, подарунок…" value="${escapeHtml(hs.q)}" aria-label="Пошук"></div>
       <button type="button" class="ms-hs-filter-btn${filtersActive?' has-active':''}" id="hsFilterBtn" aria-expanded="${!!state.historyFiltersOpen}" aria-controls="hsFilters" title="Фільтри" aria-label="Фільтри">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
       </button>
