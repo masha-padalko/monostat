@@ -202,6 +202,7 @@ let state = {
   dailyBudgetEndDate: null, // selected date through which to spread the current card balance
   recurringHidden: [], // ids of recurring-payment rows the user hid (ms_recurring_hidden)
   historySearch: {q:'', from:'', to:'', min:'', max:'', cat:'', kind:'all', limit:100}, // filters of the whole-history search panel
+  historyFiltersOpen: false, // filter panel under the search field, opened by the filter icon
   editingTripDates: null, // tripId whose inline date-picker form is currently open, or null
   authChecking: true, // true only during the very first initAuth() check — avoids flashing the login form before we know a session already exists
   useCache: true, // whether to merge cached historical periods in alongside the freshly fetched range
@@ -1835,52 +1836,7 @@ function resultsPanel(){
   panel1.className='ms-panel';
   const donutGradient = buildConicGradient(catList.filter(([c])=>c!==TRANSFERS_CAT), cleanTotal);
 
-  // trip spend for THIS period only (not all-time) — she can already see full-trip
-  // totals in "Подорожі", this is specifically "how much of THIS period was travel"
-  const CURRENCY_FLAGS = {
-    980:'🇺🇦', 978:'🇪🇺', 840:'🇺🇸', 985:'🇵🇱', 946:'🇷🇴', 981:'🇬🇪', 498:'🇲🇩',
-    949:'🇹🇷', 826:'🇬🇧', 203:'🇨🇿', 348:'🇭🇺', 752:'🇸🇪', 578:'🇳🇴', 208:'🇩🇰', 756:'🇨🇭'
-  };
-  const tripSpendByTrip = {};
-  const tripCurrencySpend = {};
-  all.forEach(t=>{
-    const tid = tripIdFor(t);
-    if(!tid) return;
-    tripSpendByTrip[tid] = (tripSpendByTrip[tid]||0) + Math.abs(t.amount);
-    if(t.currency && t.currency!==980){
-      tripCurrencySpend[tid] = tripCurrencySpend[tid] || {};
-      tripCurrencySpend[tid][t.currency] = (tripCurrencySpend[tid][t.currency]||0) + Math.abs(t.amount);
-    }
-  });
-  const tripEntries = Object.entries(tripSpendByTrip)
-    .map(([tid,sum])=>{
-      const currencySpend = tripCurrencySpend[tid];
-      // every distinct foreign currency actually spent in, not just the biggest one —
-      // a trip through several countries should show all their flags, not one "winner"
-      const flags = currencySpend
-        ? Object.entries(currencySpend).sort((a,b)=>b[1]-a[1]).map(([cur])=>CURRENCY_FLAGS[cur]).filter(Boolean)
-        : ['🧳'];
-      return {
-        name: state.trips.find(t=>t.id===tid)?.name || '?',
-        sum,
-        flags: [...new Set(flags)].join(' ')
-      };
-    })
-    .sort((a,b)=>b.sum-a.sum);
-  const tripPeriodTotal = tripEntries.reduce((s,e)=>s+e.sum,0);
-
   panel1.innerHTML = `
-    <h2>Загальна картина</h2>
-    ${tripPeriodTotal>0 ? `
-    <div class="ms-trip-period-summary">
-      <div class="ms-hint" style="margin-bottom:6px">🧳 Поїздки за цей період</div>
-      ${tripEntries.map(e=>`
-        <div class="ms-trip-period-row">
-          <span class="ms-trip-period-name">${e.flags} ${escapeHtml(e.name)}</span>
-          <span class="ms-trip-period-amt">${fmt(e.sum)} ${curSym()}<span class="ms-trip-period-eur">${fmtEur(e.sum, curCode())}</span></span>
-        </div>
-      `).join('')}
-    </div>` : ''}
     <div class="ms-hero">
       <div class="ms-donut-wrap">
         <div class="ms-donut" style="background:conic-gradient(${donutGradient})"></div>
@@ -2383,7 +2339,9 @@ function buildRecurringPaymentsPanel(){
   });
   const CUR_SYMBOLS = {980:'₴',978:'€',840:'$',985:'zł',946:'lei',981:'₾'};
   const dayDiff = (d1,d2)=>{ const x=Math.abs(d1-d2); return Math.min(x,31-x); };
-  const subs = Object.values(appleGroups).filter(g=>g.length>=2).map(g=>{
+  // a price group with one payment so far can be a subscription's NEW price — it may merge
+  // into an older group below; on its own it is not a subscription yet (dropped after merging)
+  const subs = Object.values(appleGroups).map(g=>{
     const sorted = g.slice().sort((a,b)=>a.date-b.date);
     return { cur:g[0].currency, price:Math.abs(g[0].operationAmount), txs:sorted,
       first:sorted[0].date, last:sorted[sorted.length-1].date, prevPrices:[] };
@@ -2402,7 +2360,17 @@ function buildRecurringPaymentsPanel(){
     }
     merged.push(sub);
   });
+  for(let i=merged.length-1; i>=0; i--) if(merged[i].txs.length<2) merged.splice(i,1);
+  // One row per subscription, only its latest payment: iCloud is the ~$0.99 plan, YouTube
+  // Premium the $5+ one. Other Apple price tiers and older groups aren't shown as separate
+  // subscriptions — the operations themselves stay in the history untouched.
+  const appleKind = sub => sub.price>=5 ? 'youtube' : sub.price<2 ? 'icloud' : null;
+  const newestByKind = {};
   merged.forEach(sub=>{
+    const k = appleKind(sub);
+    if(k && (!newestByKind[k] || sub.last > newestByKind[k].last)) newestByKind[k] = sub;
+  });
+  Object.values(newestByKind).forEach(sub=>{
     const last = sub.txs[sub.txs.length-1];
     const nextDue = new Date(last.date.getFullYear(), last.date.getMonth()+1, last.date.getDate());
     const daysLeft = Math.round((nextDue.getTime()-today.getTime())/(24*60*60*1000));
@@ -2416,7 +2384,8 @@ function buildRecurringPaymentsPanel(){
         : {label:`iCloud · Apple (${fmt(Math.abs(last.amount))} ₴${origNote})`, icon:'icloud'}),
       lastAmt:Math.abs(last.amount), lastDate:last.date, nextDue, daysLeft, note:priceNote });
   });
-  const shownRows = rows.filter(r=>!r.id || !state.recurringHidden.includes(r.id));
+  // a payment that stopped long ago is a cancelled subscription, not one "overdue" forever
+  const shownRows = rows.filter(r=>r.daysLeft >= -45);
   rows.length = 0; shownRows.forEach(r=>rows.push(r));
 
   if(!rows.length){ p.hidden = true; return p; }
@@ -2435,17 +2404,6 @@ function buildRecurringPaymentsPanel(){
         ${r.daysLeft<0 ? `⚠ просрочено на ${-r.daysLeft} дн.` : (soon ? `⚠ через ${r.daysLeft} дн.` : `через ${r.daysLeft} дн.`)}
       </span>
     `;
-    if(r.id){
-      const hb = document.createElement('button');
-      hb.textContent='✕'; hb.title='Приховати (це не підписка або вона скасована)';
-      hb.style.cssText='margin-left:8px;padding:2px 8px;cursor:pointer;background:none;border:1px solid var(--line,#444);border-radius:6px;color:var(--muted)';
-      hb.addEventListener('click', async()=>{
-        state.recurringHidden = state.recurringHidden.concat([r.id]);
-        render();
-        await storageSet('ms_recurring_hidden', JSON.stringify(state.recurringHidden));
-      });
-      row.appendChild(hb);
-    }
     wrap.appendChild(row);
   });
   return p;
@@ -2492,19 +2450,6 @@ function buildCleanExpensesPanel(all, grossTotal, periodDays){
 // Cashback paid out to the card is taxed in Ukraine: 18% personal income tax + 5% military levy.
 const CASHBACK_TAX_RATE = 0.23;
 
-// She types the cashback the Monobank app shows; from now on only newer operations add to it.
-// An empty answer goes back to the automatic sum.
-async function setCashbackFromApp(){
-  const cur = state.cashbackAnchor ? String(state.cashbackAnchor.amount).replace('.',',') : '';
-  const ans = prompt('Скільки кешбеку зараз у застосунку Monobank (до податку)?\nПорожнє поле — рахувати автоматично.', cur);
-  if(ans===null) return;
-  const v = parseFloat(ans.replace(/\s/g,'').replace(',','.'));
-  if(ans.trim()==='') state.cashbackAnchor = null;
-  else if(isNaN(v) || v<0){ alert('Впиши суму числом, наприклад 250 або 250,40.'); return; }
-  else state.cashbackAnchor = {amount: Math.round(v*100)/100, time: Math.floor(Date.now()/1000)};
-  await storageSet('ms_cashbackanchor', JSON.stringify(state.cashbackAnchor));
-  render();
-}
 function buildBalancePanel(){
   const p = document.createElement('div');
   p.className='ms-panel';
@@ -2517,9 +2462,8 @@ function buildBalancePanel(){
   // Cashback sitting in Monobank now — not tied to the selected period or card. The API has no
   // "cashback balance", only a per-operation `cashbackAmount`, and Monobank keeps ONE cashback
   // for all of her cards, so it's summed over every card's cached operations since the last
-  // "Виведення кешбеку". When the cache doesn't reach that far back the sum is too small —
-  // then she types the real amount from the Monobank app once (state.cashbackAnchor), and
-  // only cashback of later operations is added on top of it.
+  // "Виведення кешбеку". An amount she typed in earlier from the Monobank app
+  // (state.cashbackAnchor) is still used as the starting point. Shown: only the net amount.
   let cashbackPill = '';
   if(acc.cashbackType !== 'Miles'){
     const isWithdrawal = it => /виведення кешбеку|cashback withdrawal/i.test(it.description||'');
@@ -2528,20 +2472,13 @@ function buildBalancePanel(){
     const anchor = state.cashbackAnchor && state.cashbackAnchor.time > lastW ? state.cashbackAnchor : null;
     const since = anchor ? anchor.time : lastW;
     const accCb = (anchor ? anchor.amount : 0) + allCache.filter(it=>it.time>since).reduce((sum,it)=>sum+(it.cashbackAmount||0)/100,0);
-    const periodCb = state.txs.reduce((sum,t)=>sum+(t.cashback||0),0);
     if(accCb > 0.004 || anchor){
       const netCb = accCb * (1 - CASHBACK_TAX_RATE);
-      const taxPct = Math.round(CASHBACK_TAX_RATE*100);
-      const sinceLabel = since ? new Date(since*1000).toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'}) : '';
-      const basis = anchor ? `вписано вручну ${sinceLabel} + нові покупки` : lastW ? 'з останнього виведення ('+sinceLabel+')' : 'за всі завантажені операції';
-      const tip = `Кешбек ${basis}: ${fmt(accCb)} ${curSym()}. Після податку ${taxPct}%: ${fmt(netCb)} ${curSym()}. За обраний період: ${fmt(periodCb)} ${curSym()}. Не збігається з Monobank? Натисни і впиши точну суму.`;
-      cashbackPill = `<button type="button" class="ms-bc-cashback" id="cashbackBtn" title="${tip}" aria-label="Кешбек ${fmt(accCb)} ${curSym()}. Змінити суму">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v4h-4"/><path d="M9.5 9.5h3.2a1.6 1.6 0 0 1 0 3.2h-1.4a1.6 1.6 0 0 0 0 3.2h3.2M12 8v1.5M12 15.9v1.6"/></svg>
-          <span>+${fmt(accCb)} ${curSym()}</span>
-          <small>кешбек</small>
-          <span class="ms-bc-cb-net">−${taxPct}% → ${fmt(netCb)} ${curSym()}</span>
-          <small>на карту</small>
-        </button>`;
+      const tipText = 'Кешбек після податку, який буде зараховано на картку';
+      cashbackPill = `<div class="ms-bc-cashback">
+          <span class="ms-bc-cb-net">${fmt(netCb)} ${curSym()}</span>
+          <span class="ms-bc-cb-info" tabindex="0" role="img" aria-label="${tipText}" data-tip="${tipText}">i</span>
+        </div>`;
     }
   }
   p.innerHTML = `
@@ -2564,7 +2501,6 @@ function buildBalancePanel(){
       </div>
     </div>
   `;
-  p.querySelector('#cashbackBtn')?.addEventListener('click', setCashbackFromApp);
   return p;
 }
 
@@ -3072,10 +3008,16 @@ function buildHistorySearchPanel(){
   p.className = 'ms-panel';
   const hs = state.historySearch;
   const catOpts = sortedCats().map(c=>`<option value="${escapeHtml(c)}"${hs.cat===c?' selected':''}>${escapeHtml(c)}</option>`).join('');
+  const filtersActive = !!(hs.from || hs.to || hs.min || hs.max || hs.cat || hs.kind!=='all'); // dot on the icon while the panel is closed
   p.innerHTML = `<h2>Пошук по всій історії</h2>
     <p class="ms-hint">Шукає серед усіх ${accCache().length} операцій цієї картки в кеші (усі роки, що завантажені або імпортовані з CSV), незалежно від вибраного періоду. Кілька слів — шукає всі одразу: назва магазину, нотатка, коментар з банку, категорія або частина номера картки (наприклад, «5354»).</p>
-    <div class="ms-field" style="margin-bottom:10px"><input type="text" id="hsQ" placeholder="Наприклад: nike, кросівки, 5354, подарунок…" value="${escapeHtml(hs.q)}"></div>
-    <div class="ms-row">
+    <div class="ms-hs-search">
+      <div class="ms-field"><input type="text" id="hsQ" placeholder="Наприклад: nike, кросівки, 5354, подарунок…" value="${escapeHtml(hs.q)}" aria-label="Пошук"></div>
+      <button type="button" class="ms-hs-filter-btn${filtersActive?' has-active':''}" id="hsFilterBtn" aria-expanded="${!!state.historyFiltersOpen}" aria-controls="hsFilters" title="Фільтри" aria-label="Фільтри">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
+      </button>
+    </div>
+    <div class="ms-row ms-hs-filters" id="hsFilters"${state.historyFiltersOpen?'':' hidden'}>
       <div class="ms-field"><label>Від дати</label><input type="date" id="hsFrom" value="${escapeHtml(hs.from)}"></div>
       <div class="ms-field"><label>До дати</label><input type="date" id="hsTo" value="${escapeHtml(hs.to)}"></div>
       <div class="ms-field"><label>Сума від</label><input type="number" id="hsMin" min="0" step="any" value="${escapeHtml(String(hs.min))}"></div>
@@ -3101,6 +3043,15 @@ function buildHistorySearchPanel(){
   p.querySelector('#hsCat').addEventListener('change', e=>{ state.historySearch.cat = e.target.value; state.historySearch.limit = 100; renderHistoryResults(p); });
   p.querySelector('#hsKind').addEventListener('change', e=>{ state.historySearch.kind = e.target.value; state.historySearch.limit = 100; renderHistoryResults(p); });
   p.querySelector('#hsMore').addEventListener('click', ()=>{ state.historySearch.limit += 100; renderHistoryResults(p); });
+  // the icon opens/closes the filter panel in place (no render — the typed text keeps its focus)
+  p.querySelector('#hsFilterBtn').addEventListener('click', e=>{
+    state.historyFiltersOpen = !state.historyFiltersOpen;
+    p.querySelector('#hsFilters').hidden = !state.historyFiltersOpen;
+    e.currentTarget.setAttribute('aria-expanded', String(state.historyFiltersOpen));
+  });
+  const markActive = ()=>{ const h = state.historySearch; p.querySelector('#hsFilterBtn').classList.toggle('has-active', !!(h.from||h.to||h.min||h.max||h.cat||h.kind!=='all')); };
+  p.querySelector('#hsFilters').addEventListener('input', markActive);
+  p.querySelector('#hsFilters').addEventListener('change', markActive);
   p.querySelector('#hsReset').addEventListener('click', ()=>{
     state.historySearch = {q:'', from:'', to:'', min:'', max:'', cat:'', kind:'all', limit:100};
     render();
