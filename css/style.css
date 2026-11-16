@@ -336,7 +336,8 @@
   .ms-bc-chip::after{top:0;bottom:0;left:35%;width:1px;box-shadow:12px 0 0 rgba(60,60,66,0.45);}
   .ms-bc-nfc{width:26px;height:26px;color:rgba(255,255,255,0.75);}
   .ms-bc-bottom{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;}
-  .ms-bc-cashback{display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:14px;background:rgba(255,255,255,0.09);border:1px solid rgba(255,255,255,0.14);font-family:var(--font-mono);white-space:nowrap;}
+  .ms-bc-cashback{display:flex;align-items:center;gap:7px;padding:8px 12px;border-radius:14px;background:rgba(255,255,255,0.09);border:1px solid rgba(255,255,255,0.14);font-family:var(--font-mono);white-space:nowrap;}
+  .ms-bc-cashback svg{width:18px;height:18px;color:#e8c46a;flex-shrink:0;}
   .ms-bc-cashback .ms-bc-cb-net{font-size:15px;font-weight:600;color:#9fd8a8;}
   .ms-bc-cb-info{position:relative;width:18px;height:18px;border-radius:50%;border:1px solid rgba(255,255,255,0.4);color:rgba(255,255,255,0.75);
     font:italic 600 11px/16px Georgia,serif;text-align:center;cursor:help;flex-shrink:0;}
@@ -550,10 +551,21 @@
 
   .ms-overview{display:grid;grid-template-columns:minmax(0,2fr) minmax(300px,1fr);gap:14px;align-items:start;}
   .ms-ov-main,.ms-ov-side{display:flex;flex-direction:column;gap:14px;min-width:0;}
-  .ms-ov-cardrow{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:14px;align-items:stretch;}
+  /* card at 70% of its former size (was 1.25fr of 2.25); "per day" next to it at the card's height */
+  .ms-ov-cardrow{display:grid;grid-template-columns:minmax(0,.875fr) minmax(0,1.375fr);gap:14px;align-items:stretch;}
   .ms-ov-cardrow > *{min-width:0;}
   .ms-overview .ms-panel{margin-bottom:0;}
-  .ms-ov-card .ms-balance-card{max-width:none;height:100%;}
+  .ms-ov-card .ms-balance-card{max-width:none;min-height:0;padding:16px 18px;border-radius:16px;}
+  .ms-ov-card .ms-bc-amount{font-size:24px;}
+  .ms-ov-card .ms-bc-eur{font-size:11px;}
+  .ms-ov-card .ms-bc-sub{font-size:10.5px;margin-top:4px;}
+  .ms-ov-card .ms-bc-chip{transform:scale(.8);transform-origin:left center;}
+  .ms-ov-card .ms-bc-nfc{width:21px;height:21px;}
+  .ms-ov-card .ms-bc-cashback{padding:6px 9px;border-radius:11px;}
+  .ms-ov-card .ms-bc-cashback .ms-bc-cb-net{font-size:13px;}
+  .ms-ov-budget{padding:16px 18px !important;}
+  .ms-ov-budget h2{margin-bottom:4px;}
+  .ms-ov-budget .ms-field{margin-bottom:8px !important;}
   /* "Загальна картина" in the wide column: donut on the left, categories on the right */
   .ms-ov-general .ms-hero{flex-direction:row;align-items:flex-start;gap:28px;}
   .ms-ov-general .ms-legend{flex:1;min-width:0;}
@@ -567,7 +579,7 @@
     .ms-overview{display:flex;flex-direction:column;align-items:stretch;}
     .ms-ov-general .ms-hero{flex-direction:column;align-items:center;}
     .ms-ov-main,.ms-ov-side,.ms-ov-cardrow{display:contents;}
-    .ms-ov-card{order:1;} .ms-ov-range{order:2;} .ms-ov-budget{order:3;} .ms-ov-today{order:4;} .ms-ov-general{order:5;} .ms-ov-recurring{order:6;}
+    .ms-ov-card{order:1;} .ms-ov-range{order:2;} .ms-ov-budget{order:3;} .ms-ov-today{order:4;} .ms-ov-general{order:5;} .ms-ov-ops{order:6;} .ms-ov-recurring{order:7;}
     .ms-ov-card .ms-balance-card{max-width:440px;height:auto;aspect-ratio:auto;}
   }
   @media (max-width:760px){
@@ -589,7 +601,7 @@
   .ms-panel.is-collapsed h2{margin:0;}
   /* "Скільки можна витрачати на день": money picture in the bottom-right corner */
   .ms-results .ms-panel.ms-budget:not(.is-collapsed){background-image:url("../img/money.svg");background-repeat:no-repeat;
-    background-position:right 14px bottom 14px;background-size:130px auto;min-height:190px;}
+    background-position:right 14px bottom 14px;background-size:100px auto;}
   @media (max-width:760px){ .ms-results .ms-panel.ms-budget:not(.is-collapsed){background-size:96px auto;} }
 
   /* ⟳ refresh without reloading the page, next to "Оновлено о …" */

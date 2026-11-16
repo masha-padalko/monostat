@@ -2211,7 +2211,7 @@ function resultsPanel(){
 
     // left: bank card (right under the heading) + "how much per day" side by side,
     // "Загальна картина" under them; right: period, "Зараз" (today/yesterday), "Регулярні платежі".
-    // On a phone it's one column: card, period, per day, Зараз, Загальна картина, Регулярні платежі.
+    // On a phone it's one column: card, period, per day, Зараз, Загальна картина, Всі операції, Регулярні платежі.
     const panelRecurring = buildRecurringPaymentsPanel();
     const overview = document.createElement('div');
     overview.className = 'ms-overview';
@@ -2229,6 +2229,8 @@ function resultsPanel(){
     cardRow.appendChild(panelDailyBudget);
     main.appendChild(cardRow);
     main.appendChild(panel1);
+    panel2.classList.add('ms-ov-ops'); // "Всі операції" of the chosen period, same list as on its tab
+    main.appendChild(panel2);
     const side = document.createElement('div');
     side.className = 'ms-ov-side';
     side.appendChild(panelRange);
@@ -2384,9 +2386,6 @@ function buildRecurringPaymentsPanel(){
         : {label:`iCloud · Apple (${fmt(Math.abs(last.amount))} ₴${origNote})`, icon:'icloud'}),
       lastAmt:Math.abs(last.amount), lastDate:last.date, nextDue, daysLeft, note:priceNote });
   });
-  // a payment that stopped long ago is a cancelled subscription, not one "overdue" forever
-  const shownRows = rows.filter(r=>r.daysLeft >= -45);
-  rows.length = 0; shownRows.forEach(r=>rows.push(r));
 
   if(!rows.length){ p.hidden = true; return p; }
 
@@ -2476,6 +2475,7 @@ function buildBalancePanel(){
       const netCb = accCb * (1 - CASHBACK_TAX_RATE);
       const tipText = 'Кешбек після податку, який буде зараховано на картку';
       cashbackPill = `<div class="ms-bc-cashback">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v4h-4"/><path d="M9.5 9.5h3.2a1.6 1.6 0 0 1 0 3.2h-1.4a1.6 1.6 0 0 0 0 3.2h3.2M12 8v1.5M12 15.9v1.6"/></svg>
           <span class="ms-bc-cb-net">${fmt(netCb)} ${curSym()}</span>
           <span class="ms-bc-cb-info" tabindex="0" role="img" aria-label="${tipText}" data-tip="${tipText}">i</span>
         </div>`;
