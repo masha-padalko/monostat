@@ -30,6 +30,7 @@ function sortedCats(){
 // rewritten on a rename. The lists are rebuilt from the code's originals each time, so
 // applying the renames twice (e.g. sign out and in again) changes nothing.
 let catRenames = {};
+let catIcons = {}; // current name -> emoji she picked for a built-in category (ms_caticons); own categories keep it in customCats
 let BASE_CATS, BASE_ICONS, BASE_COLORS; // the code's own categories — snapshot right after ICONS below
 function cn(name){ return catRenames[name] || name; }
 function applyCatRenames(){
@@ -39,6 +40,7 @@ function applyCatRenames(){
   Object.keys(BASE_ICONS).forEach(k=>{ icons[cn(k)] = BASE_ICONS[k]; });
   Object.keys(BASE_COLORS).forEach(k=>{ colors[cn(k)] = BASE_COLORS[k]; });
   custom.forEach((c,i)=>{ icons[c.name] = c.icon || '🏷️'; if(!colors[c.name]) colors[c.name] = CUSTOM_CAT_PALETTE[i % CUSTOM_CAT_PALETTE.length]; });
+  Object.keys(catIcons).forEach(k=>{ if(CATS.includes(k)) icons[k] = catIcons[k]; });
   Object.keys(ICONS).forEach(k=>delete ICONS[k]); Object.assign(ICONS, icons);
   Object.keys(COLORS).forEach(k=>delete COLORS[k]); Object.assign(COLORS, colors);
   // a saved value that is no longer a category but a renamed code name (e.g. built-in defaults)
@@ -46,6 +48,15 @@ function applyCatRenames(){
   Object.keys(state.overrides).forEach(k=>{ state.overrides[k] = fix(state.overrides[k]); });
   Object.keys(state.txCategoryOverride).forEach(k=>{ state.txCategoryOverride[k] = fix(state.txCategoryOverride[k]); });
   state.manual.forEach(m=>{ m.cat = fix(m.cat); });
+}
+// The emoji of a category (from the editor in Менеджер категорій).
+async function setCategoryIcon(name, icon){
+  icon = (icon||'').trim();
+  if(!icon || icon===ICONS[name]) return;
+  const own = state.customCats.find(c=>c.name===name);
+  if(own){ own.icon = icon; await storageSet('ms_customcats', JSON.stringify(state.customCats)); }
+  else{ catIcons[name] = icon; await storageSet('ms_caticons', JSON.stringify(catIcons)); }
+  applyCatRenames();
 }
 async function renameCategory(oldName, newName){
   newName = (newName||'').trim();
@@ -63,6 +74,7 @@ async function renameCategory(oldName, newName){
   Object.keys(state.txCategoryOverride).forEach(k=>{ state.txCategoryOverride[k] = re(state.txCategoryOverride[k]); });
   state.manual.forEach(m=>{ m.cat = re(m.cat); });
   if(state.historySearch.cat===oldName) state.historySearch.cat = newName;
+  if(catIcons[oldName]){ catIcons[newName] = catIcons[oldName]; delete catIcons[oldName]; await storageSet('ms_caticons', JSON.stringify(catIcons)); }
   applyCatRenames();
   await storageSet('ms_catrenames', JSON.stringify(catRenames));
   await persistOverrides(); await persistTxCategoryOverride(); await persistManual();
@@ -444,6 +456,8 @@ async function loadPersisted(){
   if(migratedCategoryOverrides) await persistOverrides();
   if(migratedTransactionCategories) await persistTxCategoryOverride();
   if(migratedManualCategories) await persistManual();
+  const cic = await storageGet('ms_caticons');
+  if(cic){ try{ catIcons = JSON.parse(cic) || {}; }catch(e){} }
   const crn = await storageGet('ms_catrenames');
   if(crn){ try{ catRenames = JSON.parse(crn) || {}; }catch(e){} }
   applyCatRenames();
@@ -734,7 +748,7 @@ function exportData(){
     loanKeys: state.loanKeys, usedIncoming: state.usedIncoming, notes: state.notes,
     customCats: state.customCats, notExpense: state.notExpense, dayExcluded: state.dayExcluded,
     amountOverride: state.amountOverride, txCategoryOverride: state.txCategoryOverride, share: state.share,
-    txCache: state.txCache, trips: state.trips, tripOf: state.tripOf, catRenames,
+    txCache: state.txCache, trips: state.trips, tripOf: state.tripOf, catRenames, catIcons,
     exportedAt: new Date().toISOString()
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
@@ -769,6 +783,7 @@ async function importDataFromFile(file){
     payload.customCats.forEach(c=>{ if(!state.customCats.find(x=>x.name===c.name)) applyCustomCategory(c, true); });
   }
   if(payload.catRenames){ catRenames = {...catRenames, ...payload.catRenames}; await storageSet('ms_catrenames', JSON.stringify(catRenames)); }
+  if(payload.catIcons){ catIcons = {...catIcons, ...payload.catIcons}; await storageSet('ms_caticons', JSON.stringify(catIcons)); }
   applyCatRenames();
   Object.keys(state.overrides).forEach(desc=>{
     if(CATEGORY_RENAMES[state.overrides[desc]]) state.overrides[desc] = CATEGORY_RENAMES[state.overrides[desc]];
@@ -3424,6 +3439,7 @@ function buildTripsPanel(all){
 // added here, and a rename changes the name everywhere (lists, charts, saved choices).
 const PENCIL_ICON = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>`;
 let editingCat = null; // category whose name is being edited inline
+const EMOJI_CHOICES = ['🧺','🛒','🍞','🥦','🍎','🍽️','☕','🍕','🍷','🍺','🚕','🚌','🚎','🚆','✈️','🚗','⛽','🅿️','🏠','💡','📶','📱','💻','👗','👟','💅','💇','🏬','💊','💉','🩺','🧘','🏋️','⚽','🎉','🎬','🎮','📚','🎓','🎁','🐶','👶','🤝','💵','💳','🧾','💼','🏦','✂️','🛠️','🧳','🏖️','🏷️','❓'];
 function buildCustomCategoryPanel(){
   const p = document.createElement('div');
   p.className='ms-panel ms-catman';
@@ -3433,7 +3449,7 @@ function buildCustomCategoryPanel(){
   const own = new Set(state.customCats.map(c=>c.name));
   p.innerHTML = `
     <h2>Менеджер категорій</h2>
-    <p class="ms-hint">Нова категорія одразу зʼявляється у всіх списках вибору. Якщо перейменувати категорію, нова назва застосується всюди: в операціях, діаграмі, поїздках, пошуку і для вже збережених виборів.</p>
+    <p class="ms-hint">Нова категорія одразу зʼявляється у всіх списках вибору. Олівець — змінити назву та іконку. Якщо перейменувати категорію, нова назва застосується всюди: в операціях, діаграмі, поїздках, пошуку і для вже збережених виборів.</p>
     <div class="ms-manual-form ms-catman-add">
       <div class="ms-field" style="max-width:70px"><label for="ccIcon">Іконка</label><input type="text" id="ccIcon" placeholder="🏷️" maxlength="4"></div>
       <div class="ms-field" style="flex:2"><label for="ccName">Нова категорія</label><input type="text" id="ccName" placeholder="Наприклад: хобі"></div>
@@ -3450,14 +3466,27 @@ function buildCustomCategoryPanel(){
     const icon = `<span class="ms-catman-ic" style="background:${(COLORS[name]||'#8C7A5C')}22">${ICONS[name]||'🏷️'}</span>`;
     if(editingCat===name){
       row.classList.add('is-editing');
-      row.innerHTML = `${icon}
+      let chosen = ICONS[name] || '🏷️';
+      row.innerHTML = `<span class="ms-catman-ic" data-role="preview" style="background:${(COLORS[name]||'#8C7A5C')}22">${escapeHtml(chosen)}</span>
         <input type="text" class="ms-catman-input" value="${escapeHtml(name)}" aria-label="Нова назва категорії ${escapeHtml(name)}">
         <button type="button" class="ms-btn" data-act="save">Зберегти</button>
-        <button type="button" class="ms-btn secondary" data-act="cancel">Скасувати</button>`;
-      const input = row.querySelector('input');
+        <button type="button" class="ms-btn secondary" data-act="cancel">Скасувати</button>
+        <div class="ms-emoji-pick" role="radiogroup" aria-label="Іконка категорії">
+          ${EMOJI_CHOICES.map(e=>`<button type="button" class="ms-emoji${e===chosen?' is-on':''}" role="radio" aria-checked="${e===chosen}" data-emoji="${e}">${e}</button>`).join('')}
+          <input type="text" class="ms-emoji-own" maxlength="4" placeholder="своє" aria-label="Своє емодзі">
+        </div>`;
+      const input = row.querySelector('.ms-catman-input');
+      const preview = row.querySelector('[data-role="preview"]');
+      const pick = e=>{
+        chosen = e; preview.textContent = e;
+        row.querySelectorAll('.ms-emoji').forEach(b=>{ const on = b.dataset.emoji===e; b.classList.toggle('is-on', on); b.setAttribute('aria-checked', String(on)); });
+      };
+      row.querySelectorAll('.ms-emoji').forEach(b=>b.addEventListener('click', ()=>{ row.querySelector('.ms-emoji-own').value=''; pick(b.dataset.emoji); }));
+      row.querySelector('.ms-emoji-own').addEventListener('input', e=>{ const v = e.target.value.trim(); if(v) pick(v); });
       const save = async ()=>{
         const res = await renameCategory(name, input.value);
         if(res==='exists'){ alert('Категорія з такою назвою вже є.'); input.focus(); return; }
+        await setCategoryIcon(res==='ok' ? input.value.trim() : name, chosen);
         editingCat = null; render();
       };
       row.querySelector('[data-act="save"]').addEventListener('click', save);
@@ -3471,7 +3500,7 @@ function buildCustomCategoryPanel(){
       row.innerHTML = `${icon}
         <span class="ms-catman-name">${escapeHtml(name)}${own.has(name) ? ' <span class="ms-tag">своя</span>' : ''}</span>
         <span class="ms-catman-uses">${n ? n+' оп.' : '—'}</span>
-        <button type="button" class="ms-icon-round" data-act="edit" title="Перейменувати" aria-label="Перейменувати ${escapeHtml(name)}">${PENCIL_ICON}</button>`;
+        <button type="button" class="ms-icon-round" data-act="edit" title="Змінити назву та іконку" aria-label="Змінити ${escapeHtml(name)}">${PENCIL_ICON}</button>`;
       row.querySelector('[data-act="edit"]').addEventListener('click', ()=>{ editingCat = name; render(); });
     }
     list.appendChild(row);

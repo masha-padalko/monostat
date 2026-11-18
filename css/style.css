@@ -677,7 +677,15 @@
   .ms-catman-uses{font-family:var(--font-mono);font-size:12px;color:var(--muted);white-space:nowrap;}
   .ms-catman-input{flex:1;min-width:0;padding:8px 10px;border:1px solid var(--gold);border-radius:8px;background:var(--bg);color:var(--text);font:inherit;font-size:14px;}
   .ms-catman-row .ms-btn{padding:8px 12px;font-size:13px;}
+  .ms-catman-row.is-editing{flex-wrap:wrap;}
+  .ms-emoji-pick{flex:1 1 100%;display:flex;flex-wrap:wrap;gap:4px;padding:8px 0 4px 46px;}
+  .ms-emoji{width:36px;height:36px;border:1px solid transparent;border-radius:10px;background:var(--bg);font-size:18px;line-height:1;cursor:pointer;padding:0;}
+  .ms-emoji:hover{border-color:var(--line);}
+  .ms-emoji.is-on{border-color:var(--gold);background:#EFDDB8;}
+  .ms-emoji:focus-visible{outline:2px solid var(--gold);outline-offset:1px;}
+  .ms-emoji-own{width:64px;height:36px;padding:0 8px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--text);font:inherit;font-size:14px;text-align:center;}
   @media (max-width:520px){
     .ms-catman-row.is-editing{flex-wrap:wrap;}
     .ms-catman-row.is-editing .ms-catman-input{flex:1 1 calc(100% - 50px);}
+    .ms-emoji-pick{padding-left:0;}
   }
