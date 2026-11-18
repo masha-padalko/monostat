@@ -21,6 +21,54 @@ const CATEGORY_RENAMES = {
 function sortedCats(){
   return [...CATS].sort((a,b)=>a.localeCompare(b,'uk'));
 }
+
+// ---------- category renames (Менеджер категорій) ----------
+// Built-in names also live in the code (keyword rules, MCC fallback, "перекази людям"...).
+// A rename of a built-in category is kept as  code name -> current name  (ms_catrenames);
+// every name that comes from the code goes through cn(). Her own data (merchant choices,
+// per-purchase choices, manual entries, own categories) always holds current names and is
+// rewritten on a rename. The lists are rebuilt from the code's originals each time, so
+// applying the renames twice (e.g. sign out and in again) changes nothing.
+let catRenames = {};
+let BASE_CATS, BASE_ICONS, BASE_COLORS; // the code's own categories — snapshot right after ICONS below
+function cn(name){ return catRenames[name] || name; }
+function applyCatRenames(){
+  const custom = state.customCats;
+  CATS = [...new Set(BASE_CATS.map(cn).concat(custom.map(c=>c.name)))];
+  const icons = {}, colors = {};
+  Object.keys(BASE_ICONS).forEach(k=>{ icons[cn(k)] = BASE_ICONS[k]; });
+  Object.keys(BASE_COLORS).forEach(k=>{ colors[cn(k)] = BASE_COLORS[k]; });
+  custom.forEach((c,i)=>{ icons[c.name] = c.icon || '🏷️'; if(!colors[c.name]) colors[c.name] = CUSTOM_CAT_PALETTE[i % CUSTOM_CAT_PALETTE.length]; });
+  Object.keys(ICONS).forEach(k=>delete ICONS[k]); Object.assign(ICONS, icons);
+  Object.keys(COLORS).forEach(k=>delete COLORS[k]); Object.assign(COLORS, colors);
+  // a saved value that is no longer a category but a renamed code name (e.g. built-in defaults)
+  const fix = v => (!CATS.includes(v) && catRenames[v]) ? catRenames[v] : v;
+  Object.keys(state.overrides).forEach(k=>{ state.overrides[k] = fix(state.overrides[k]); });
+  Object.keys(state.txCategoryOverride).forEach(k=>{ state.txCategoryOverride[k] = fix(state.txCategoryOverride[k]); });
+  state.manual.forEach(m=>{ m.cat = fix(m.cat); });
+}
+async function renameCategory(oldName, newName){
+  newName = (newName||'').trim();
+  if(!newName || newName===oldName) return 'same';
+  if(CATS.includes(newName)) return 'exists';
+  const own = state.customCats.find(c=>c.name===oldName);
+  if(own) own.name = newName;
+  else{
+    const orig = BASE_CATS.find(c=>cn(c)===oldName);
+    if(orig===undefined) return 'same';
+    if(orig===newName) delete catRenames[orig]; else catRenames[orig] = newName;
+  }
+  const re = v => v===oldName ? newName : v;
+  Object.keys(state.overrides).forEach(k=>{ state.overrides[k] = re(state.overrides[k]); });
+  Object.keys(state.txCategoryOverride).forEach(k=>{ state.txCategoryOverride[k] = re(state.txCategoryOverride[k]); });
+  state.manual.forEach(m=>{ m.cat = re(m.cat); });
+  if(state.historySearch.cat===oldName) state.historySearch.cat = newName;
+  applyCatRenames();
+  await storageSet('ms_catrenames', JSON.stringify(catRenames));
+  await persistOverrides(); await persistTxCategoryOverride(); await persistManual();
+  await storageSet('ms_customcats', JSON.stringify(state.customCats));
+  return 'ok';
+}
 // Category pickers show "Часті" first: the 5 categories met most often in the selected card's
 // expenses over the last 90 days (+ manual entries), then every category alphabetically.
 // Counted once per render(); with too little history it's just the alphabet, as before.
@@ -69,6 +117,7 @@ const ICONS = {
   'послуги (ФОП)':'🧾','перекази людям':'🤝',
   'комунальні послуги':'🏠','інше':'❓'
 };
+BASE_CATS = [...CATS]; BASE_ICONS = {...ICONS}; BASE_COLORS = {...COLORS}; // before any own category or rename
 
 function defaultRules(){
   return [
@@ -111,16 +160,16 @@ function categorize(desc, mcc, amount, overrides, rules){
   // This must run BEFORE the merchant-wide override: "Ryan Air" is usually saved there as "літак"
   // (for the ticket), which used to swallow the small onboard charges too. Any other category she
   // chose for the merchant still wins, and a per-transaction override wins over everything.
-  const airOverride = !overrides[desc] || overrides[desc]==='Подорожі: літак' || overrides[desc]==='Путешествия транспорт: самолёт';
-  if(airOverride && (d.includes('wizz') || d.includes('ryan')) && amount < 0 && Math.abs(amount) < 600) return 'Подорожі: кава в літаку';
-  if(overrides[desc]) return overrides[desc];
+  const airOverride = !overrides[desc] || overrides[desc]===cn('Подорожі: літак') || overrides[desc]==='Путешествия транспорт: самолёт';
+  if(airOverride && (d.includes('wizz') || d.includes('ryan')) && amount < 0 && Math.abs(amount) < 600) return cn('Подорожі: кава в літаку');
+  if(overrides[desc]) return overrides[desc]; // her own choice — already the current name
   for(const r of rules){
-    for(const kw of r.kw){ if(d.includes(kw)) return r.cat; }
+    for(const kw of r.kw){ if(d.includes(kw)) return cn(r.cat); }
   }
-  if(isPersonTransfer(desc) && amount < 0) return 'перекази людям';
+  if(isPersonTransfer(desc) && amount < 0) return cn('перекази людям');
   const fb = mccFallback(mcc);
-  if(fb) return fb;
-  return 'інше';
+  if(fb) return cn(fb);
+  return cn('інше');
 }
 // Category for one specific transaction: a per-transaction override (set when she picks
 // "тільки цю покупку") always wins over the merchant-wide rule, so recategorizing one
@@ -173,7 +222,7 @@ let state = {
   expandedCats: {},
   expandedBlocks: {transactions:false, incoming:false}, // accordion-style "show more" for the 3-col panels
   notes: {...window.MonoStatDefaults.DEFAULT_NOTES},         // txKey -> free-text note about that specific transaction
-  mainTab: (function(){ try{ const h=(location.hash||'').slice(1); return ['overview','history','trips','data'].includes(h)?h:'overview'; }catch(e){ return 'overview'; } })(),
+  mainTab: (function(){ try{ const h=(location.hash||'').slice(1); return ['overview','history','trips','cats','data'].includes(h)?h:'overview'; }catch(e){ return 'overview'; } })(),
   dayExcluded: {...window.MonoStatDefaults.DEFAULT_DAY_EXCLUDED},     // txKey -> true if unchecked in "Зараз" (excluded from today/yesterday total)
   notExpense: {...window.MonoStatDefaults.DEFAULT_NOT_EXPENSE},       // txKey -> true — flagged as "not a real expense" (refunded/recharged, fund contribution, etc.) for "Чисті трати"
   syncedByAcc: {},       // accountId -> [[fromUnix,toUnix],...] — periods already fetched/imported completely FOR THAT CARD, so gap detection doesn't re-request them
@@ -395,6 +444,9 @@ async function loadPersisted(){
   if(migratedCategoryOverrides) await persistOverrides();
   if(migratedTransactionCategories) await persistTxCategoryOverride();
   if(migratedManualCategories) await persistManual();
+  const crn = await storageGet('ms_catrenames');
+  if(crn){ try{ catRenames = JSON.parse(crn) || {}; }catch(e){} }
+  applyCatRenames();
 }
 
 async function persistOverrides(){ await storageSet('ms_overrides', JSON.stringify(state.overrides)); }
@@ -659,7 +711,7 @@ async function setNote(key, text){
 const SPLIT_CATS = ['продукти спільні','розваги спільні'];
 function noteButtonHandler(t, key, existingNote){
   let prefill = existingNote || '';
-  if(!existingNote && SPLIT_CATS.includes(t.cat)){
+  if(!existingNote && SPLIT_CATS.map(cn).includes(t.cat)){
     const nStr = prompt('На скільки осіб ділиш цю трату? (включно з тобою)', '2');
     const n = parseInt(nStr, 10);
     if(nStr!==null && n>0){
@@ -682,7 +734,7 @@ function exportData(){
     loanKeys: state.loanKeys, usedIncoming: state.usedIncoming, notes: state.notes,
     customCats: state.customCats, notExpense: state.notExpense, dayExcluded: state.dayExcluded,
     amountOverride: state.amountOverride, txCategoryOverride: state.txCategoryOverride, share: state.share,
-    txCache: state.txCache, trips: state.trips, tripOf: state.tripOf,
+    txCache: state.txCache, trips: state.trips, tripOf: state.tripOf, catRenames,
     exportedAt: new Date().toISOString()
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
@@ -716,6 +768,8 @@ async function importDataFromFile(file){
   if(payload.customCats){
     payload.customCats.forEach(c=>{ if(!state.customCats.find(x=>x.name===c.name)) applyCustomCategory(c, true); });
   }
+  if(payload.catRenames){ catRenames = {...catRenames, ...payload.catRenames}; await storageSet('ms_catrenames', JSON.stringify(catRenames)); }
+  applyCatRenames();
   Object.keys(state.overrides).forEach(desc=>{
     if(CATEGORY_RENAMES[state.overrides[desc]]) state.overrides[desc] = CATEGORY_RENAMES[state.overrides[desc]];
   });
@@ -1768,6 +1822,7 @@ const MAIN_TABS = [
   {id:'overview', icon:'📊', label:'Огляд'},
   {id:'history',  icon:'🔎', label:'Пошук по історії'},
   {id:'trips',    icon:'✈️', label:'Подорожі та події'},
+  {id:'cats',     icon:'🏷️', label:'Менеджер категорій'},
   {id:'data',     icon:'💾', label:'Дані та імпорт'},
 ];
 function resultsPanel(){
@@ -1814,7 +1869,7 @@ function resultsPanel(){
   const total = Object.values(byCat).reduce((s,v)=>s+v,0);
   // biggest spend first, but transfers to people are not real spending categories — always last
   const catList = Object.entries(byCat).sort((a,b)=>{
-    const ta = a[0]==='перекази людям', tb = b[0]==='перекази людям';
+    const ta = a[0]===cn('перекази людям'), tb = b[0]===cn('перекази людям');
     if(ta!==tb) return ta ? 1 : -1;
     return a[1]-b[1];
   });
@@ -1831,7 +1886,7 @@ function resultsPanel(){
     periodDays = Math.max(1, Math.round((t.getTime()-f.getTime())/(24*60*60*1000))+1);
   }
   // transfers to people aren't real spending — the donut, its percentages and the daily average ignore them
-  const TRANSFERS_CAT = 'перекази людям';
+  const TRANSFERS_CAT = cn('перекази людям');
   const cleanTotal = total - (byCat[TRANSFERS_CAT]||0);
   const avgPerDay = Math.abs(cleanTotal)/periodDays;
 
@@ -2261,12 +2316,10 @@ function resultsPanel(){
     wrap.appendChild(gap(buildHistorySearchPanel()));
   }else if(tab==='trips'){
     wrap.appendChild(buildTripsPanel(getAllHistoricalExpenses()));
+  }else if(tab==='cats'){
+    wrap.appendChild(buildCustomCategoryPanel());
   }else if(tab==='data'){
-    const bottomRow = document.createElement('div');
-    bottomRow.className = 'ms-grid';
-    bottomRow.appendChild(buildCustomCategoryPanel());
-    bottomRow.appendChild(buildDataTransferPanel());
-    wrap.appendChild(bottomRow);
+    wrap.appendChild(buildDataTransferPanel());
   }
 
   p.appendChild(wrap);
@@ -3367,34 +3420,70 @@ function buildTripsPanel(all){
   return p;
 }
 
+// "Менеджер категорій": every category with how many operations use it; new ones are
+// added here, and a rename changes the name everywhere (lists, charts, saved choices).
+const PENCIL_ICON = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>`;
+let editingCat = null; // category whose name is being edited inline
 function buildCustomCategoryPanel(){
   const p = document.createElement('div');
-  p.className='ms-panel';
+  p.className='ms-panel ms-catman';
+  const uses = {};
+  accCache().forEach(it=>{ if(it.amount<0){ const c = categoryFor(mapRawItem(it)); uses[c] = (uses[c]||0) + 1; } });
+  state.manual.forEach(m=>{ if(m.amount<0) uses[m.cat] = (uses[m.cat]||0) + 1; });
+  const own = new Set(state.customCats.map(c=>c.name));
   p.innerHTML = `
-    <h2>Додати свою категорію</h2>
-    <p class="ms-hint">Впиши назву і будь-яку емодзі-іконку — категорія одразу зʼявиться у всіх списках вибору.</p>
-    <div class="ms-manual-form">
-      <div class="ms-field" style="max-width:70px"><label>Іконка</label><input type="text" id="ccIcon" placeholder="🏷️" maxlength="4"></div>
-      <div class="ms-field" style="flex:2"><label>Назва категорії</label><input type="text" id="ccName" placeholder="Наприклад: хобі"></div>
+    <h2>Менеджер категорій</h2>
+    <p class="ms-hint">Нова категорія одразу зʼявляється у всіх списках вибору. Якщо перейменувати категорію, нова назва застосується всюди: в операціях, діаграмі, поїздках, пошуку і для вже збережених виборів.</p>
+    <div class="ms-manual-form ms-catman-add">
+      <div class="ms-field" style="max-width:70px"><label for="ccIcon">Іконка</label><input type="text" id="ccIcon" placeholder="🏷️" maxlength="4"></div>
+      <div class="ms-field" style="flex:2"><label for="ccName">Нова категорія</label><input type="text" id="ccName" placeholder="Наприклад: хобі"></div>
       <button class="ms-btn" id="ccAdd" style="align-self:flex-end">Додати</button>
     </div>
-    <div id="ccList" style="margin-top:12px"></div>
+    <div class="ms-catman-count">${CATS.length} категорій</div>
+    <div id="ccList" class="ms-catman-list"></div>
   `;
   const list = p.querySelector('#ccList');
-  if(state.customCats.length){
-    state.customCats.forEach(c=>{
-      const row = document.createElement('div');
-      row.className = 'ms-today-cat-row';
-      row.innerHTML = `<span class="ms-legend-icon">${c.icon||'🏷️'}</span><span class="ms-today-cat-name">${escapeHtml(c.name)}</span>`;
-      list.appendChild(row);
-    });
-  }
-  p.querySelector('#ccAdd').addEventListener('click', async ()=>{
+  sortedCats().forEach(name=>{
+    const row = document.createElement('div');
+    row.className = 'ms-catman-row';
+    const n = uses[name] || 0;
+    const icon = `<span class="ms-catman-ic" style="background:${(COLORS[name]||'#8C7A5C')}22">${ICONS[name]||'🏷️'}</span>`;
+    if(editingCat===name){
+      row.classList.add('is-editing');
+      row.innerHTML = `${icon}
+        <input type="text" class="ms-catman-input" value="${escapeHtml(name)}" aria-label="Нова назва категорії ${escapeHtml(name)}">
+        <button type="button" class="ms-btn" data-act="save">Зберегти</button>
+        <button type="button" class="ms-btn secondary" data-act="cancel">Скасувати</button>`;
+      const input = row.querySelector('input');
+      const save = async ()=>{
+        const res = await renameCategory(name, input.value);
+        if(res==='exists'){ alert('Категорія з такою назвою вже є.'); input.focus(); return; }
+        editingCat = null; render();
+      };
+      row.querySelector('[data-act="save"]').addEventListener('click', save);
+      row.querySelector('[data-act="cancel"]').addEventListener('click', ()=>{ editingCat = null; render(); });
+      input.addEventListener('keydown', e=>{
+        if(e.key==='Enter'){ e.preventDefault(); save(); }
+        if(e.key==='Escape'){ editingCat = null; render(); }
+      });
+      setTimeout(()=>{ input.focus(); input.select(); }, 0);
+    }else{
+      row.innerHTML = `${icon}
+        <span class="ms-catman-name">${escapeHtml(name)}${own.has(name) ? ' <span class="ms-tag">своя</span>' : ''}</span>
+        <span class="ms-catman-uses">${n ? n+' оп.' : '—'}</span>
+        <button type="button" class="ms-icon-round" data-act="edit" title="Перейменувати" aria-label="Перейменувати ${escapeHtml(name)}">${PENCIL_ICON}</button>`;
+      row.querySelector('[data-act="edit"]').addEventListener('click', ()=>{ editingCat = name; render(); });
+    }
+    list.appendChild(row);
+  });
+  const add = async ()=>{
     const name = p.querySelector('#ccName').value;
     const icon = p.querySelector('#ccIcon').value || '🏷️';
     const ok = await addCustomCategory(name, icon);
     if(!ok) alert('Категорія з такою назвою вже є, або назва порожня.');
-  });
+  };
+  p.querySelector('#ccAdd').addEventListener('click', add);
+  p.querySelector('#ccName').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); add(); } });
   return p;
 }
 
