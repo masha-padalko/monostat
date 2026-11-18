@@ -551,6 +551,7 @@
   .ms-period-custom-lbl{font-size:12px;color:var(--muted);padding:0 8px;}
   .ms-period-dates{display:flex;align-items:center;gap:6px;}
   .ms-period-dates input{flex:1;min-width:0;padding:8px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--text);font:inherit;font-size:13px;}
+  .ms-period-today{font-size:13px;color:var(--muted);white-space:nowrap;}
   .ms-period-custom .ms-btn{padding:9px 14px;font-size:13px;}
 
   /* pencil next to an operation she entered by hand */

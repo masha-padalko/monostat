@@ -196,7 +196,7 @@ let state = {
   jarDraftStartDate: null, // transient — whatever she's currently picked in the date field, before clicking (Re)start
   jarStartDateActual: null, // when THIS tracking run actually began — fixed, unlike jarLastDate which advances to today once caught up
   jarAutoCheckedThisLoad: false, // ensures the background jar catch-up only runs once per page load, never re-fires mid-interaction
-  period: {preset:'month'}, // chosen period (ms_period): a preset id or {preset:'custom', from, to}
+  period: {preset:'month'}, // chosen period (ms_period): a preset id or {preset:'custom', from} — a custom period always ends today
   periodOpen: false,         // period dropdown unfolded
   cashbackAnchor: null, // {amount, time}: cashback she typed in from the Monobank app (ms_cashbackanchor)
   dailyBudgetEndDate: null, // selected date through which to spread the current card balance
@@ -932,7 +932,7 @@ const PERIOD_PRESETS = [
 function resolvePeriod(p){
   const now = new Date(), y = now.getFullYear(), m = now.getMonth();
   const today = todayStr();
-  if(p && p.preset==='custom' && p.from && p.to) return p.from <= p.to ? {from:p.from, to:p.to} : {from:p.to, to:p.from};
+  if(p && p.preset==='custom' && p.from) return {from: p.from < today ? p.from : today, to:today}; // own start date, always up to today
   if(p && p.preset==='30d') return {from:daysAgoStr(29), to:today};
   if(p && p.preset==='prevMonth') return {from:todayStr(new Date(y, m-1, 1)), to:todayStr(new Date(y, m, 0))};
   return {from:todayStr(new Date(y, m, 1)), to:today};
@@ -1585,8 +1585,7 @@ function periodPicker(){
         <div class="ms-period-custom-lbl">Свої дати</div>
         <div class="ms-period-dates">
           <input type="date" id="periodFrom" value="${custom.from}" max="${todayStr()}" aria-label="З дати">
-          <span aria-hidden="true">–</span>
-          <input type="date" id="periodTo" value="${custom.to}" max="${todayStr()}" aria-label="По дату">
+          <span class="ms-period-today">– по сьогодні</span>
         </div>
         <button type="button" class="ms-btn" id="periodApply">Показати</button>
       </div>
@@ -1594,9 +1593,9 @@ function periodPicker(){
   wrap.querySelector('#periodBtn').addEventListener('click', ()=>{ state.periodOpen = !state.periodOpen; render(); });
   wrap.querySelectorAll('[data-preset]').forEach(b=>b.addEventListener('click', ()=>setPeriod({preset:b.dataset.preset})));
   wrap.querySelector('#periodApply')?.addEventListener('click', ()=>{
-    const f = wrap.querySelector('#periodFrom').value, t = wrap.querySelector('#periodTo').value;
-    if(!f || !t) return;
-    setPeriod({preset:'custom', from:f, to:t});
+    const f = wrap.querySelector('#periodFrom').value;
+    if(!f) return;
+    setPeriod({preset:'custom', from:f});
   });
   return wrap;
 }
