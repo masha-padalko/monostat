@@ -561,10 +561,10 @@
   .ms-overview{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(320px,1fr);gap:14px;align-items:start;}
   .ms-ov-main,.ms-ov-side{display:flex;flex-direction:column;gap:14px;min-width:0;}
   /* card keeps its size; "per day" next to it at the card's height */
-  .ms-ov-cardrow{display:grid;grid-template-columns:minmax(0,360px) minmax(0,1fr);gap:14px;align-items:stretch;}
+  .ms-ov-cardrow{display:grid;grid-template-columns:minmax(0,414px) minmax(0,1fr);gap:14px;align-items:stretch;}
   @media (max-width:1280px) and (min-width:1001px){
     .ms-ov-cardrow{grid-template-columns:minmax(0,1fr);}
-    .ms-ov-cardrow .ms-ov-card .ms-balance-card{max-width:360px;}
+    .ms-ov-cardrow .ms-ov-card .ms-balance-card{max-width:414px;}
   }
   .ms-ov-cardrow > *{min-width:0;}
   .ms-overview .ms-panel{margin-bottom:0;}
