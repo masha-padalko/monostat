@@ -21,19 +21,26 @@ function sortedCats(){
 let catRenames = {};
 let catIcons = {}; // current name -> emoji she picked for a built-in category (ms_caticons); own categories keep it in customCats
 let BASE_CATS, BASE_ICONS, BASE_COLORS; // the code's own categories — snapshot right after ICONS below
-function cn(name){ return catRenames[name] || name; }
+// Deleted built-in categories (code names, ms_catdeleted): whatever the code would put there goes to "інше".
+let catDeleted = [];
+const UNDELETABLE = ['інше','перекази людям']; // "інше" takes deleted ones; transfers are handled specially
+function cn(name){
+  if(catDeleted.includes(name)) return cn('інше');
+  return catRenames[name] || name;
+}
 function applyCatRenames(){
   const custom = state.customCats;
-  CATS = [...new Set(BASE_CATS.map(cn).concat(custom.map(c=>c.name)))];
+  const live = BASE_CATS.filter(c=>!catDeleted.includes(c));
+  CATS = [...new Set(live.map(cn).concat(custom.map(c=>c.name)))];
   const icons = {}, colors = {};
-  Object.keys(BASE_ICONS).forEach(k=>{ icons[cn(k)] = BASE_ICONS[k]; });
-  Object.keys(BASE_COLORS).forEach(k=>{ colors[cn(k)] = BASE_COLORS[k]; });
+  Object.keys(BASE_ICONS).forEach(k=>{ if(!catDeleted.includes(k)) icons[cn(k)] = BASE_ICONS[k]; });
+  Object.keys(BASE_COLORS).forEach(k=>{ if(!catDeleted.includes(k)) colors[cn(k)] = BASE_COLORS[k]; });
   custom.forEach((c,i)=>{ icons[c.name] = c.icon || '🏷️'; if(!colors[c.name]) colors[c.name] = CUSTOM_CAT_PALETTE[i % CUSTOM_CAT_PALETTE.length]; });
   Object.keys(catIcons).forEach(k=>{ if(CATS.includes(k)) icons[k] = catIcons[k]; });
   Object.keys(ICONS).forEach(k=>delete ICONS[k]); Object.assign(ICONS, icons);
   Object.keys(COLORS).forEach(k=>delete COLORS[k]); Object.assign(COLORS, colors);
   // a saved value that is no longer a category but a renamed code name (e.g. built-in defaults)
-  const fix = v => (!CATS.includes(v) && catRenames[v]) ? catRenames[v] : v;
+  const fix = v => CATS.includes(v) ? v : cn(v);
   Object.keys(state.overrides).forEach(k=>{ state.overrides[k] = fix(state.overrides[k]); });
   Object.keys(state.txCategoryOverride).forEach(k=>{ state.txCategoryOverride[k] = fix(state.txCategoryOverride[k]); });
   state.manual.forEach(m=>{ m.cat = fix(m.cat); });
@@ -54,7 +61,7 @@ async function renameCategory(oldName, newName){
   const own = state.customCats.find(c=>c.name===oldName);
   if(own) own.name = newName;
   else{
-    const orig = BASE_CATS.find(c=>cn(c)===oldName);
+    const orig = BASE_CATS.find(c=>!catDeleted.includes(c) && cn(c)===oldName);
     if(orig===undefined) return 'same';
     if(orig===newName) delete catRenames[orig]; else catRenames[orig] = newName;
   }
@@ -70,6 +77,38 @@ async function renameCategory(oldName, newName){
   await persistOverrides(); await persistTxCategoryOverride(); await persistManual();
   await storageSet('ms_customcats', JSON.stringify(state.customCats));
   return 'ok';
+}
+// Delete a category: her own one disappears, a built-in one is hidden; every operation that was
+// in it (her choices, manual entries, and what the code would put there) moves to "інше".
+function isCategoryDeletable(name){
+  if(state.customCats.some(c=>c.name===name)) return true;
+  const orig = BASE_CATS.find(c=>!catDeleted.includes(c) && cn(c)===name);
+  return orig!==undefined && !UNDELETABLE.includes(orig);
+}
+async function deleteCategory(name){
+  if(!isCategoryDeletable(name)) return false;
+  const own = state.customCats.findIndex(c=>c.name===name);
+  if(own>=0) state.customCats.splice(own,1);
+  else{
+    const orig = BASE_CATS.find(c=>!catDeleted.includes(c) && cn(c)===name);
+    catDeleted.push(orig);
+    delete catRenames[orig];
+  }
+  const other = cn('інше');
+  const re = v => v===name ? other : v;
+  Object.keys(state.overrides).forEach(k=>{ state.overrides[k] = re(state.overrides[k]); });
+  Object.keys(state.txCategoryOverride).forEach(k=>{ state.txCategoryOverride[k] = re(state.txCategoryOverride[k]); });
+  state.manual.forEach(m=>{ m.cat = re(m.cat); });
+  if(state.historySearch.cat===name) state.historySearch.cat = '';
+  delete catIcons[name]; delete state.catOff[name];
+  applyCatRenames();
+  await storageSet('ms_catdeleted', JSON.stringify(catDeleted));
+  await storageSet('ms_catrenames', JSON.stringify(catRenames));
+  await storageSet('ms_caticons', JSON.stringify(catIcons));
+  await storageSet('ms_catoff', JSON.stringify(state.catOff));
+  await persistOverrides(); await persistTxCategoryOverride(); await persistManual();
+  await storageSet('ms_customcats', JSON.stringify(state.customCats));
+  return true;
 }
 // Category pickers show "Часті" first: the 5 categories met most often in the selected card's
 // expenses over the last 90 days (+ manual entries), then every category alphabetically.
@@ -396,6 +435,8 @@ async function loadPersisted(){
   const cof = await storageGet('ms_catoff'); if(cof){ try{ state.catOff = JSON.parse(cof) || {}; }catch(e){} }
   const cic = await storageGet('ms_caticons');
   if(cic){ try{ catIcons = JSON.parse(cic) || {}; }catch(e){} }
+  const cdl = await storageGet('ms_catdeleted');
+  if(cdl){ try{ catDeleted = JSON.parse(cdl) || []; }catch(e){} }
   const crn = await storageGet('ms_catrenames');
   if(crn){ try{ catRenames = JSON.parse(crn) || {}; }catch(e){} }
   applyCatRenames();
@@ -655,7 +696,7 @@ function exportData(){
     loanKeys: state.loanKeys, usedIncoming: state.usedIncoming, notes: state.notes,
     customCats: state.customCats, notExpense: state.notExpense, dayExcluded: state.dayExcluded,
     amountOverride: state.amountOverride, txCategoryOverride: state.txCategoryOverride, share: state.share,
-    txCache: state.txCache, trips: state.trips, tripOf: state.tripOf, catRenames, catIcons,
+    txCache: state.txCache, trips: state.trips, tripOf: state.tripOf, catRenames, catIcons, catDeleted,
     exportedAt: new Date().toISOString()
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
@@ -691,6 +732,7 @@ async function importDataFromFile(file){
   }
   if(payload.catRenames){ catRenames = {...catRenames, ...payload.catRenames}; await storageSet('ms_catrenames', JSON.stringify(catRenames)); }
   if(payload.catIcons){ catIcons = {...catIcons, ...payload.catIcons}; await storageSet('ms_caticons', JSON.stringify(catIcons)); }
+  if(payload.catDeleted){ catDeleted = [...new Set(catDeleted.concat(payload.catDeleted))]; await storageSet('ms_catdeleted', JSON.stringify(catDeleted)); }
   applyCatRenames();
   await persistOverrides(); await persistManual(); await persistDebts(); await persistNotes();
   await persistNotExpense(); await persistDayExcluded(); await persistAmountOverride(); await persistTxCategoryOverride();
@@ -1435,20 +1477,6 @@ function chev(open){
 // (older entries keep exactly the date they always had, so their saved notes/marks still match).
 function manualDate(m){ return m.time ? new Date(m.date+'T'+m.time) : new Date(m.date); }
 function nowHM(){ const d = new Date(); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
-// Logo of a known shop in the operations list (js/brands.js): the brand's glyph on its colour,
-// or a letter badge when there is no logo; otherwise the category emoji as before.
-function merchantIcon(desc, color, emoji){
-  const B = window.MonoStatBrands, d = ' '+(desc||'').toLowerCase()+' ';
-  const has = b => b.kw.some(k=>d.includes(k));
-  const logo = B && B.logos.find(has);
-  if(logo){
-    const h = logo.hex, lum = (0.299*parseInt(h.slice(0,2),16) + 0.587*parseInt(h.slice(2,4),16) + 0.114*parseInt(h.slice(4,6),16));
-    return `<span class="ms-txicon ms-txlogo" style="background:#${h};color:${lum>200?'#2A2A2A':'#fff'}" title="${escapeHtml(logo.title)}"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="${logo.path}"/></svg></span>`;
-  }
-  const mono = B && B.monograms.find(has);
-  if(mono) return `<span class="ms-txicon ms-txmono" style="background:${color}22;color:${color}" title="${escapeHtml(mono.title)}">${escapeHtml(mono.text)}</span>`;
-  return `<span class="ms-txicon" style="background:${color}22;color:${color}">${emoji}</span>`;
-}
 // Marks an operation she typed in herself (cash etc.), not one from Monobank.
 const MANUAL_BADGE = `<span class="ms-manual" title="Внесено вручну, не з Monobank">вручну</span>`;
 const CALENDAR_ICON = `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="4"/><path d="M8 3v4M16 3v4M3.5 10h17"/></svg>`;
@@ -1462,7 +1490,7 @@ function periodPicker(){
   wrap.innerHTML = `
     <button type="button" class="ms-period-btn" id="periodBtn" aria-expanded="${state.periodOpen}" aria-haspopup="true">
       <span class="ms-period-ic">${CALENDAR_ICON}</span>
-      <span class="ms-period-text"><span class="ms-period-cap">Період</span><span class="ms-period-label">${periodLabel(state.from, state.to)}</span></span>
+      <span class="ms-period-text"><span class="ms-period-label">${periodLabel(state.from, state.to)}</span></span>
       <span class="ms-period-chev">${CHEVRON_ICON}</span>
     </button>
     ${state.periodOpen ? `<div class="ms-period-menu" role="menu">
@@ -1809,7 +1837,7 @@ function resultsPanel(){
   panel2.className='ms-panel';
   panel2.innerHTML = `<h2>Всі операції <span class="ms-h2-period">${periodLabel(state.from, state.to)}</span>
       <button type="button" class="ms-icon-round ms-manual-toggle" id="manualToggle" aria-expanded="${!!state.manualFormOpen}" aria-controls="manualForm" title="${state.manualFormOpen?'Закрити ручне введення':'Ручне введення: додати витрату'}" aria-label="Ручне введення витрати">
-        <svg class="ic-open" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>
+        <svg class="ic-open" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 21h4L16 12l-4-4-9 9v4z"/><path d="M10.5 9.5l4 4"/><path d="M19 2v6M16 5h6"/></svg>
         <svg class="ic-close" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
       </button></h2><p class="ms-hint">Натисни на операцію, щоб змінити категорію (запам'ятається для цього мерчанта), прив'язати її до поїздки, позначити як «не витрата», вказати свою частку або додати нотатку.</p>
     <div class="ms-field" style="margin-bottom:10px">
@@ -1854,7 +1882,7 @@ function resultsPanel(){
     const time = t.manual && !t.manualTime ? '' : t.date.toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'})+' · ';
     const foreign = !t.manual && t.currency && t.currency!==curCode() && t.operationAmount;
     row.innerHTML = `
-      ${t.manual ? `<span class="ms-txicon" style="background:${color}22;color:${color}">${ICONS[t.cat]||'•'}</span>` : merchantIcon(t.desc, color, ICONS[t.cat]||'•')}
+      <span class="ms-txicon" style="background:${color}22;color:${color}">${ICONS[t.cat]||'•'}</span>
       <span class="ms-txmain">
         <span class="ms-txdesc"></span>
         <span class="ms-txsub">${time}${escapeHtml(t.cat)}${tripName?` · ✈️ ${escapeHtml(tripName)}`:''}${isNotExpense?' · не витрата':''}</span>
@@ -3145,6 +3173,7 @@ function buildTripsPanel(all){
 // "Менеджер категорій": every category; new ones are
 // added here, and a rename changes the name everywhere (lists, charts, saved choices).
 const PENCIL_ICON = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>`;
+const TRASH_ICON = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V4h6v3"/></svg>`;
 let editingCat = null; // category whose name is being edited inline
 const EMOJI_CHOICES = [
   '🧺','🛒','🍞','🥐','🥦','🍎','🍓','🥩','🧀','🥛','🍫','🍬','🍽️','🍔','🍕','🍣','🍜','🥗','☕','🧋','🍷','🍺','🍸','🥂',
@@ -3175,7 +3204,7 @@ function buildCustomCategoryPanel(){
   const own = new Set(state.customCats.map(c=>c.name));
   p.innerHTML = `
     <h2>Менеджер категорій</h2>
-    <p class="ms-hint">Нова категорія одразу зʼявляється у всіх списках вибору. Олівець — змінити назву та іконку. Якщо перейменувати категорію, нова назва застосується всюди: в операціях, діаграмі, поїздках, пошуку і для вже збережених виборів.</p>
+    <p class="ms-hint">Нова категорія одразу зʼявляється у всіх списках вибору. Олівець — змінити назву та іконку, кошик — видалити (операції перейдуть в «інше»). Якщо перейменувати категорію, нова назва застосується всюди: в операціях, діаграмі, поїздках, пошуку і для вже збережених виборів.</p>
     <div class="ms-manual-form ms-catman-add">
       <div class="ms-field ms-catman-icon-field"><label>Іконка</label>
         <button type="button" class="ms-catman-icon-btn" id="ccIconBtn" aria-expanded="${newCatPickerOpen}" aria-controls="ccPicker" title="Вибрати іконку">${escapeHtml(newCatIcon)}${chev(newCatPickerOpen)}</button></div>
@@ -3218,8 +3247,16 @@ function buildCustomCategoryPanel(){
     }else{
       row.innerHTML = `${icon}
         <span class="ms-catman-name">${escapeHtml(name)}${own.has(name) ? ' <span class="ms-tag">своя</span>' : ''}</span>
-        <button type="button" class="ms-icon-round" data-act="edit" title="Змінити назву та іконку" aria-label="Змінити ${escapeHtml(name)}">${PENCIL_ICON}</button>`;
+        <button type="button" class="ms-icon-round" data-act="edit" title="Змінити назву та іконку" aria-label="Змінити ${escapeHtml(name)}">${PENCIL_ICON}</button>
+        ${isCategoryDeletable(name)
+          ? `<button type="button" class="ms-icon-round ms-catman-del" data-act="del" title="Видалити категорію" aria-label="Видалити ${escapeHtml(name)}">${TRASH_ICON}</button>`
+          : `<span class="ms-catman-del-space" title="Системна категорія — її не можна видалити"></span>`}`;
       row.querySelector('[data-act="edit"]').addEventListener('click', ()=>{ editingCat = name; render(); });
+      row.querySelector('[data-act="del"]')?.addEventListener('click', async ()=>{
+        if(!confirm(`Видалити категорію «${name}»?\nЇї операції перейдуть у «${cn('інше')}». Самі операції не видаляються.`)) return;
+        await deleteCategory(name);
+        render();
+      });
     }
     list.appendChild(row);
   });
