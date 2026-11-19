@@ -6,17 +6,6 @@ let CATS = ['продукти','продукти спільні','таксі','�
   'Подорожі: автобус','Подорожі: громадський транспорт','авто','пальне','обіди','догляд','краса',
   'ліки','аналізи','йога','подарунки','розваги','розваги спільні','інтернет','одяг','готівка (зняття)','послуги (ФОП)',
   'перекази людям','комунальні послуги','інше'];
-const CATEGORY_RENAMES = {
-  'такси':'таксі',
-  'Путешествия транспорт: самолёт':'Подорожі: літак',
-  'Путешествия транспорт: кава в літаку':'Подорожі: кава в літаку',
-  'Путешествия транспорт: поезд':'Подорожі: потяг',
-  'Путешествия транспорт: автобус':'Подорожі: автобус',
-  'Путешествия транспорт: інше':'Подорожі: громадський транспорт',
-  'Путешествия транспорт: общественный транспорт':'Подорожі: громадський транспорт',
-  'бензин':'пальне','обеды':'обіди','дц':'догляд','бьюти':'краса','лекарства':'ліки',
-  'анализи':'аналізи','йожа':'йога','Internet':'інтернет','одежда':'одяг','квартплата':'комунальні послуги'
-};
 
 function sortedCats(){
   return [...CATS].sort((a,b)=>a.localeCompare(b,'uk'));
@@ -211,7 +200,6 @@ async function handleCategoryChange(t, newCat){
 }
 
 
-
 // ---------- state ----------
 let state = {
   token: '',
@@ -250,27 +238,17 @@ let state = {
   amountOverride: {},    // txKey -> net amount after auto-detected partial refund (e.g. Bolt charge minus a same-merchant refund), used only in "Чисті трати"
   txCategoryOverride: {...window.MonoStatDefaults.DEFAULT_TX_CATEGORY_OVERRIDE}, // txKey -> category — overrides just THIS transaction, without affecting every other purchase from the same merchant
   txCache: [...window.MonoStatDefaults.DEFAULT_TX_CACHE],  // every raw transaction ever successfully fetched, deduped by id — lets old periods stay visible without re-querying the API
-  jarPending: 0,       // running total of unsent daily savings, accumulates day over day instead of resetting
-  jarLastDate: null,    // last date whose savings were already folded into jarPending
-  jarPeriodStart: null, // which month jarPending belongs to (resets on a new month)
   jarEnabled: true,      // optional — on by default for now, since she needs it this period
-  jarDailyBudget: null,  // FROZEN at enable time — deliberately does not shrink/grow as balance changes day to day
-  jarDraftStartDate: null, // transient — whatever she's currently picked in the date field, before clicking (Re)start
-  jarStartDateActual: null, // when THIS tracking run actually began — fixed, unlike jarLastDate which advances to today once caught up
-  jarAutoCheckedThisLoad: false, // ensures the background jar catch-up only runs once per page load, never re-fires mid-interaction
   period: {preset:'month'}, // chosen period (ms_period): a preset id or {preset:'custom', from} — a custom period always ends today
   periodOpen: false,         // period dropdown unfolded
   catOff: {},            // categories switched off in "Загальна картина" (ms_catoff): not in the donut/total
   cashbackAnchor: null, // {amount, time}: cashback she typed in from the Monobank app (ms_cashbackanchor)
   dailyBudgetEndDate: null, // selected date through which to spread the current card balance
-  recurringHidden: [], // ids of recurring-payment rows the user hid (ms_recurring_hidden)
   historySearch: {q:'', from:'', to:'', min:'', max:'', cat:'', kind:'all', limit:100}, // filters of the whole-history search panel
   historyFiltersOpen: false, // filter panel under the search field, opened by the filter icon
   editingTripDates: null, // tripId whose inline date-picker form is currently open, or null
   authChecking: true, // true only during the very first initAuth() check — avoids flashing the login form before we know a session already exists
   useCache: true, // whether to merge cached historical periods in alongside the freshly fetched range
-  viewRange: null, // {start:Date,end:Date(inclusive)} when a monthly-chart cycle was clicked (viewTab==='previous')
-  viewTab: 'current', // 'current' | 'previous' — which period tab is showing in the results view
   trips: [],          // [{id, name}] — named trips she can tag transactions with
   tripOf: {},          // txKey -> tripId
   expandedTrips: {},    // tripId -> bool, which trip cards are open
@@ -388,16 +366,6 @@ async function storageSet(key, value){
 
 async function loadPersisted(){
   const ov = await storageGet('ms_overrides'); if(ov) state.overrides = {...state.overrides, ...JSON.parse(ov)};
-  // Migrate any leftover combined auto/fuel values; Green Card is insurance, while
-  // the remaining merchants are fuel purchases.
-  let migratedOverrides = false;
-  Object.keys(state.overrides).forEach(k=>{
-    if(state.overrides[k]==='авто/бензин'){
-      state.overrides[k] = k.includes('Зелена картка') ? 'авто' : 'пальне';
-      migratedOverrides = true;
-    }
-  });
-  if(migratedOverrides) await persistOverrides();
   const man = await storageGet('ms_manual'); if(man) state.manual = JSON.parse(man);
   const tok = await storageGet('ms_token'); if(tok){ state.token = tok; state.rememberToken = true; }
   const d = await storageGet('ms_debts'); if(d) state.debts = JSON.parse(d);
@@ -412,17 +380,8 @@ async function loadPersisted(){
   const ao = await storageGet('ms_amountoverride'); if(ao) state.amountOverride = JSON.parse(ao);
   const tco = await storageGet('ms_txcatoverride'); if(tco) state.txCategoryOverride = {...state.txCategoryOverride, ...JSON.parse(tco)};
   const tc = await storageGet('ms_txcache'); if(tc){ const stored = JSON.parse(tc); const known=new Set(state.txCache.map(x=>x.id)); stored.forEach(it=>{ if(!known.has(it.id)){ state.txCache.push(it); known.add(it.id); } }); }
-  // one-off cleanup: an early demo version merged scrambled demo_* operations into the real cache
-  const realOnly = state.txCache.filter(it=>!String(it.id).startsWith('demo_'));
-  if(realOnly.length !== state.txCache.length){ state.txCache = realOnly; await persistTxCache(); }
-  const jp = await storageGet('ms_jarpending'); if(jp) state.jarPending = JSON.parse(jp);
-  const jld = await storageGet('ms_jarlastdate'); if(jld) state.jarLastDate = jld;
-  const jps = await storageGet('ms_jarperiodstart'); if(jps) state.jarPeriodStart = jps;
   const je = await storageGet('ms_jarenabled'); if(je!==null) state.jarEnabled = je==='true';
-  const jdb = await storageGet('ms_jardailybudget'); if(jdb) state.jarDailyBudget = JSON.parse(jdb);
-  const jsd = await storageGet('ms_jarstartdateactual'); if(jsd) state.jarStartDateActual = jsd;
   const dbed = await storageGet('ms_dailybudgetenddate'); if(dbed) state.dailyBudgetEndDate = dbed;
-  const rh = await storageGet('ms_recurring_hidden'); if(rh){ try{ state.recurringHidden = JSON.parse(rh)||[]; }catch(e){} }
   const tr = await storageGet('ms_trips'); if(tr) state.trips = JSON.parse(tr);
   const to_ = await storageGet('ms_tripof'); if(to_) state.tripOf = JSON.parse(to_);
   const cba = await storageGet('ms_cashbackanchor'); if(cba){ try{ const v = JSON.parse(cba); if(v && typeof v.amount==='number') state.cashbackAnchor = v; }catch(e){} }
@@ -434,30 +393,6 @@ async function loadPersisted(){
     stored.forEach(c=>{ if(!state.customCats.find(x=>x.name===c.name)) applyCustomCategory(c, true); });
   }
 
-  let migratedCategoryOverrides = false;
-  Object.keys(state.overrides).forEach(desc=>{
-    if(CATEGORY_RENAMES[state.overrides[desc]]){
-      state.overrides[desc] = CATEGORY_RENAMES[state.overrides[desc]];
-      migratedCategoryOverrides = true;
-    }
-  });
-  let migratedTransactionCategories = false;
-  Object.keys(state.txCategoryOverride).forEach(key=>{
-    if(CATEGORY_RENAMES[state.txCategoryOverride[key]]){
-      state.txCategoryOverride[key] = CATEGORY_RENAMES[state.txCategoryOverride[key]];
-      migratedTransactionCategories = true;
-    }
-  });
-  let migratedManualCategories = false;
-  state.manual.forEach(entry=>{
-    if(CATEGORY_RENAMES[entry.cat]){
-      entry.cat = CATEGORY_RENAMES[entry.cat];
-      migratedManualCategories = true;
-    }
-  });
-  if(migratedCategoryOverrides) await persistOverrides();
-  if(migratedTransactionCategories) await persistTxCategoryOverride();
-  if(migratedManualCategories) await persistManual();
   const cof = await storageGet('ms_catoff'); if(cof){ try{ state.catOff = JSON.parse(cof) || {}; }catch(e){} }
   const cic = await storageGet('ms_caticons');
   if(cic){ try{ catIcons = JSON.parse(cic) || {}; }catch(e){} }
@@ -664,37 +599,6 @@ async function setShare(key, fraction){
 }
 async function persistAmountOverride(){ await storageSet('ms_amountoverride', JSON.stringify(state.amountOverride)); }
 
-// Monobank's own statistics nets a refund against its original charge (e.g. a Bolt
-// ride charged then partially refunded shows as one adjusted trip, not two lines).
-// This mirrors that for "Чисті трати": same description, a later opposite-sign
-// transaction within 14 days that's no bigger than the original, gets netted in.
-// Only affects "Чисті трати" — the raw list and "Загальна картина" stay untouched.
-function autoNetRefunds(rawTxs){
-  const byDesc = {};
-  rawTxs.forEach(t=>{ (byDesc[t.desc] = byDesc[t.desc]||[]).push(t); });
-  let changed = false;
-  const GAP_MS = 14*24*60*60*1000;
-  Object.values(byDesc).forEach(group=>{
-    group.sort((a,b)=>a.date-b.date);
-    const usedRefunds = new Set();
-    group.forEach(expense=>{
-      if(expense.amount >= 0) return; // only look for refunds against actual charges
-      const key = txKey(expense);
-      if(state.amountOverride[key] !== undefined) return; // already netted earlier
-      const refund = group.find(r=>
-        !usedRefunds.has(r) && r.amount > 0 &&
-        r.date > expense.date && (r.date - expense.date) <= GAP_MS &&
-        r.amount <= Math.abs(expense.amount) + 0.5
-      );
-      if(refund){
-        usedRefunds.add(refund);
-        state.amountOverride[key] = expense.amount + refund.amount; // still negative, just smaller
-        changed = true;
-      }
-    });
-  });
-  if(changed) persistAmountOverride();
-}
 function toggleNotExpense(key, flagged){
   if(flagged) state.notExpense[key] = true;
   else delete state.notExpense[key];
@@ -788,15 +692,6 @@ async function importDataFromFile(file){
   if(payload.catRenames){ catRenames = {...catRenames, ...payload.catRenames}; await storageSet('ms_catrenames', JSON.stringify(catRenames)); }
   if(payload.catIcons){ catIcons = {...catIcons, ...payload.catIcons}; await storageSet('ms_caticons', JSON.stringify(catIcons)); }
   applyCatRenames();
-  Object.keys(state.overrides).forEach(desc=>{
-    if(CATEGORY_RENAMES[state.overrides[desc]]) state.overrides[desc] = CATEGORY_RENAMES[state.overrides[desc]];
-  });
-  Object.keys(state.txCategoryOverride).forEach(key=>{
-    if(CATEGORY_RENAMES[state.txCategoryOverride[key]]) state.txCategoryOverride[key] = CATEGORY_RENAMES[state.txCategoryOverride[key]];
-  });
-  state.manual.forEach(entry=>{
-    if(CATEGORY_RENAMES[entry.cat]) entry.cat = CATEGORY_RENAMES[entry.cat];
-  });
   await persistOverrides(); await persistManual(); await persistDebts(); await persistNotes();
   await persistNotExpense(); await persistDayExcluded(); await persistAmountOverride(); await persistTxCategoryOverride();
   await persistTrips();
@@ -810,61 +705,11 @@ function txKey(t){
   return `${d}|${t.desc}|${a}`;
 }
 
-const INCOMING_SELF_KEYWORDS = ['From UAH account','Cancellation','Скасування','Cashback withdrawal','Partial cash out','Top up','Bolt','Uber','Uklon'];
 // Shared between Загальна картина and Подорожі netting — any positive amount matching
 // these is a refund for something already counted as an expense, never real income.
 const CANCELLATION_KEYWORDS_GLOBAL = ['Скасування','Cancellation'];
 const REFUND_PRONE_MERCHANTS_GLOBAL = ['bolt','uber','uklon'];
 
-function guessPersonName(desc){
-  let d = desc.trim();
-  if(d.startsWith('From:')) d = d.slice(5).trim();
-  return d;
-}
-
-function markAsLoan(t){
-  const person = prompt('Кому позика? (ім\'я для трекера боргів)', guessPersonName(t.desc));
-  if(person===null) return;
-  const debt = {
-    id: 'd_'+Date.now(),
-    person: person.trim() || guessPersonName(t.desc),
-    amount: Math.abs(t.amount),
-    remaining: Math.abs(t.amount),
-    dateGiven: t.date instanceof Date ? todayStr(t.date) : t.date,
-    status: 'open'
-  };
-  state.debts.push(debt);
-  state.loanKeys[txKey(t)] = debt.id;
-  persistDebts();
-  render();
-}
-
-function closeDebtWithIncoming(debtId, incomingTx){
-  const debt = state.debts.find(d=>d.id===debtId);
-  if(!debt) return;
-  const applyAmt = Math.min(debt.remaining, incomingTx.amount);
-  debt.remaining = Math.round((debt.remaining - applyAmt)*100)/100;
-  if(debt.remaining <= 0.5) debt.status = 'closed';
-  state.usedIncoming[txKey(incomingTx)] = debtId;
-  persistDebts();
-  render();
-}
-
-function closeDebtManually(debtId){
-  const debt = state.debts.find(d=>d.id===debtId);
-  if(!debt) return;
-  debt.remaining = 0;
-  debt.status = 'closed';
-  persistDebts();
-  render();
-}
-
-function addManualDebt(person, amount, date){
-  const debt = {id:'d_'+Date.now(), person, amount:Math.abs(amount), remaining:Math.abs(amount), dateGiven:date, status:'open', manual:true};
-  state.debts.push(debt);
-  persistDebts();
-  render();
-}
 
 // Date + time for an actual transaction (not for date-range boundaries like trip
 // start/end or the period selector, which only ever have a date, no real time).
@@ -981,12 +826,6 @@ function daysAgoStr(n){
   return todayStr(dt);
 }
 
-// First day of the current calendar month (the default period starts here).
-function defaultPeriodStart(){
-  const now = new Date();
-  return todayStr(new Date(now.getFullYear(), now.getMonth(), 1));
-}
-
 // Last day of the month (inclusive) — the default "spread the balance until" date.
 function nextPeriodBoundary(fromDateStr){
   const now = fromDateStr ? new Date(fromDateStr+'T00:00:00') : new Date();
@@ -1039,13 +878,6 @@ function apiRange(fromStr, toStr){
   const a = Math.max(Math.floor(new Date(fromStr+'T00:00:00').getTime()/1000), b - 31*86400 + 1);
   return [Math.min(a,b), b];
 }
-function daysUntilPeriodEnd(fromDateStr){
-  const now = fromDateStr ? new Date(fromDateStr+'T00:00:00') : new Date();
-  now.setHours(0,0,0,0);
-  const boundary = nextPeriodBoundary(fromDateStr); boundary.setHours(0,0,0,0);
-  // +1 because both endpoints count as full days (today AND the last day itself)
-  return Math.max(1, Math.round((boundary.getTime()-now.getTime())/(24*60*60*1000)) + 1);
-}
 
 function daysUntilDateInclusive(endDateStr){
   const start = todayStr().split('-').map(Number);
@@ -1055,19 +887,6 @@ function daysUntilDateInclusive(endDateStr){
   return Math.max(1, Math.floor((endUtc-startUtc)/86400000)+1);
 }
 
-// Monobank gives a `balance` field on every transaction — the balance AFTER that
-// operation. That means the balance at the START of any past day can be reconstructed
-// from the cache, instead of only ever knowing "right now". Best-effort: find the
-// earliest cached transaction on/after that date and back out its own amount.
-function reconstructBalanceAtStartOfDay(dateStr){
-  const sorted = [...accCache()].sort((a,b)=>a.time-b.time);
-  const dayStartUnix = Math.floor(new Date(dateStr+'T00:00:00').getTime()/1000);
-  const firstOnOrAfter = sorted.find(it=>it.time >= dayStartUnix && it.balance!==undefined);
-  if(firstOnOrAfter) return (firstOnOrAfter.balance - firstOnOrAfter.amount)/100;
-  const lastBefore = [...sorted].reverse().find(it=>it.time < dayStartUnix && it.balance!==undefined);
-  if(lastBefore) return lastBefore.balance/100;
-  return null; // no data that far back — caller should fall back to live balance
-}
 
 // ---------- API ----------
 async function fetchClientInfo(token){
@@ -1127,7 +946,6 @@ function autoStart(){
 }
 // Dashboard for the selected card: current period from the cache at once, fresh data in the background.
 function openDashboard(info){
-  state.viewTab = 'current';
   state.step = 'results';
   state.cardPickerOpen = false;
   refreshCurrentView(); // no request, no waiting
@@ -1150,7 +968,6 @@ function switchAccount(id){
   if(id===state.selectedAccount || !state.accounts.some(a=>a.id===id)){ render(); return; }
   state.selectedAccount = id;
   rememberSelectedAccount();
-  state.viewTab = 'current'; state.viewRange = null;
   state.autoSyncDone = false; // this card's recent history gets its own check
   refreshCurrentView();       // what is already known to be this card's — at once
   render();
@@ -1192,7 +1009,6 @@ async function refreshInBackground(opts){
     }
     if(stillSame){
       refreshCurrentView(); // the period from the cache, which now has the fresh operations too
-      await updateJarAccumulation();
     }
   }
   const failed = [infoRes, stRes].find(r=>r.status==='rejected');
@@ -1346,11 +1162,9 @@ async function handleFetchStatement(){
       addSyncedRange(fromUnix, Math.min(toUnix, Math.floor(Date.now()/1000)), account);
     }
     ingestTransactions(items);
-    state.viewTab = 'current';
     state.step = 'results';
     state.refresh = {status:'ok', msg:'Оновлено о '+new Date().toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'}), code:''};
     rememberSelectedAccount(); // next visit opens straight on the dashboard with this card
-    await updateJarAccumulation(); // finish this BEFORE the first render of results, no stale flash
   }catch(e){
     state.error = 'statement';
   }
@@ -1399,24 +1213,6 @@ function getAllHistoricalExpenses(){
   return fromCache.concat(fromManual);
 }
 
-// Previous-month tab reads straight from the local cache — no API call. If that month
-// was never fetched before, the cache simply won't have it (shown as an empty state).
-function getPrevMonthRange(){
-  if(state.viewRange) return {start:new Date(state.viewRange.start), end:new Date(state.viewRange.end)};
-  // the month right before the selected period's start
-  const base = state.from ? new Date(state.from+'T00:00:00') : new Date();
-  const prevEnd = new Date(base);
-  const prevStart = new Date(base.getFullYear(), base.getMonth()-1, base.getDate());
-  return {start: prevStart, end: prevEnd};
-}
-function getActiveRawTxs(){
-  if(state.viewTab !== 'previous') return state.txs;
-  const {start, end} = getPrevMonthRange();
-  end.setHours(23,59,59,999);
-  return accCache()
-    .filter(it=>{ const d = it.time*1000; return d >= start.getTime() && d <= end.getTime(); })
-    .map(mapRawItem);
-}
 
 function parseManualJson(){
   try{
@@ -1851,21 +1647,14 @@ const MAIN_TABS = [
 function resultsPanel(){
   const p = document.createElement('div');
 
-  const activeTxs = getActiveRawTxs();
-  const isPrevTab = state.viewTab === 'previous';
-
+  const activeTxs = state.txs;
   const expenses = activeTxs.filter(t=>t.amount<0 && !state.loanKeys[txKey(t)]).map(t=>applyShare({
     ...t, cat: categoryFor(t)
   }));
   const manualExpenses = state.manual.filter(m=>{
     if(m.amount>=0) return false;
     const d = manualDate(m).getTime();
-    if(isPrevTab){
-      const {start,end} = getPrevMonthRange();
-      end.setHours(23,59,59,999);
-      return d>=start.getTime() && d<=end.getTime();
-    }
-    // current tab — only manual entries dated within the actually-selected period
+    // only manual entries dated within the selected period
     const periodStart = new Date(state.from+'T00:00:00').getTime();
     const periodEnd = new Date(state.to+'T23:59:59').getTime();
     return d>=periodStart && d<=periodEnd;
@@ -1900,14 +1689,8 @@ function resultsPanel(){
   const panelToday = buildTodayPanel(all);
 
   // days in the active period, for "середня трата в день"
-  let periodDays;
-  if(isPrevTab){
-    const {start,end} = getPrevMonthRange();
-    periodDays = Math.round((end.getTime()-start.getTime())/(24*60*60*1000))+1;
-  }else{
-    const f = new Date(state.from+'T00:00:00'), t = new Date(state.to+'T00:00:00');
-    periodDays = Math.max(1, Math.round((t.getTime()-f.getTime())/(24*60*60*1000))+1);
-  }
+  const pf = new Date(state.from+'T00:00:00'), pt = new Date(state.to+'T00:00:00');
+  const periodDays = Math.max(1, Math.round((pt.getTime()-pf.getTime())/(24*60*60*1000))+1);
   // transfers to people aren't real spending — the donut, its percentages and the daily average ignore them
   const TRANSFERS_CAT = cn('перекази людям');
   // categories she switched off in the list (checkbox) leave the donut and the total, like transfers
@@ -2006,7 +1789,6 @@ function resultsPanel(){
       legend.appendChild(detail);
     }
   });
-
 
 
   const panel2 = document.createElement('div');
@@ -2279,10 +2061,6 @@ function resultsPanel(){
   // single page used to build (and fill with data) every panel on every render
   const panelBalance = buildBalancePanel();
   const panelRange = rangePanel();
-  if(state.jarEnabled && !state.jarAutoCheckedThisLoad && (state.jarPeriodStart !== defaultPeriodStart() || !state.jarLastDate || state.jarLastDate < todayStr())){
-    state.jarAutoCheckedThisLoad = true;
-    updateJarAccumulation().then(()=>render());
-  }
   const panelDailyBudget = buildDailyBudgetPanel(all);
 
   const wrap = document.createElement('div');
@@ -2360,7 +2138,9 @@ function resultsPanel(){
   }else if(tab==='cats'){
     wrap.appendChild(buildCustomCategoryPanel());
   }else if(tab==='data'){
-    wrap.appendChild(buildDataTransferPanel());
+    const dp = buildDataTransferPanel();
+    dp.classList.add('ms-catman'); // same centered width as the category manager
+    wrap.appendChild(dp);
   }
 
   p.appendChild(wrap);
@@ -2539,43 +2319,6 @@ function buildRecurringPaymentsPanel(){
   return p;
 }
 
-function buildCleanExpensesPanel(all, grossTotal, periodDays){
-  const p = document.createElement('div');
-  p.className = 'ms-panel';
-
-  const excluded = all.filter(t=>state.notExpense[txKey(t)]);
-  const excludedSum = excluded.reduce((s,t)=>s+Math.abs(t.amount),0);
-  const netted = all.filter(t=>!state.notExpense[txKey(t)]);
-  const cleanSum = Math.abs(netted.reduce((s,t)=>{
-    const key = txKey(t);
-    const amt = state.amountOverride[key] !== undefined ? state.amountOverride[key] : t.amount;
-    return s + amt;
-  },0));
-  const nettedCount = all.filter(t=>state.amountOverride[txKey(t)]!==undefined).length;
-  const grossSum = Math.abs(grossTotal);
-  const avgCleanPerDay = cleanSum / Math.max(1, periodDays||1);
-
-  p.innerHTML = `
-    <h2>Чисті трати</h2>
-    <div class="ms-row" style="gap:20px;flex-wrap:wrap">
-      <div>
-        <div class="ms-hint" style="margin:0">Чисті трати</div>
-        <div class="ms-today-amt" style="font-size:20px;color:var(--teal)">${fmt(cleanSum)} ${curSym()}</div>
-        <div class="ms-hint" style="margin:0;opacity:.8">${fmtEur(cleanSum, curCode()).trim()}</div>
-      </div>
-      <div>
-        <div class="ms-hint" style="margin:0">Середня чиста трата в день</div>
-        <div class="ms-today-amt" style="font-size:20px;color:var(--gold)">${fmt(avgCleanPerDay)} ${curSym()}</div>
-        <div class="ms-hint" style="margin:0;opacity:.8">${fmtEur(avgCleanPerDay, curCode()).trim()} · за ${periodDays||1} дн.</div>
-      </div>
-      <div>
-        <div class="ms-hint" style="margin:0">Виключено</div>
-        <div class="ms-today-amt" style="font-size:20px;color:var(--muted)">${excluded.length} оп. · ${fmt(excludedSum)} ${curSym()}</div>
-      </div>
-    </div>
-  `;
-  return p;
-}
 
 // Cashback paid out to the card is taxed in Ukraine: 18% personal income tax + 5% military levy.
 const CASHBACK_TAX_RATE = 0.23;
@@ -2638,94 +2381,7 @@ function buildBalancePanel(){
   return p;
 }
 
-// How much she can spend per day for the rest of this budgeting period (balance split
-// evenly across the days left until the chosen date), plus a day-by-day look back at whether
-// she stayed under that line — days she did are highlighted, so she knows what's left
-// to send to the savings jar.
-function effectiveAmountGlobal(t){
-  const key = txKey(t);
-  if(state.notExpense[key]) return 0;
-  return Math.abs(state.amountOverride[key] !== undefined ? state.amountOverride[key] : t.amount);
-}
 
-async function setJarEnabled(enabled, startDate){
-  state.jarEnabled = enabled;
-  state.jarDraftStartDate = null; // committed now — stop overriding the input with a stale draft
-  await storageSet('ms_jarenabled', String(enabled));
-  if(enabled){
-    const chosenStart = startDate || todayStr();
-    const acc = state.accounts.find(a=>a.id===state.selectedAccount);
-    // if she picked a past date, reconstruct that day's opening balance from the cache
-    // (Monobank gives a `balance` field per transaction); fall back to live balance
-    // if that's today, or if we simply don't have cache reaching back that far
-    let baseBalance;
-    if(chosenStart === todayStr()){
-      baseBalance = acc ? acc.balance/100 : 0;
-    }else{
-      baseBalance = reconstructBalanceAtStartOfDay(chosenStart);
-      if(baseBalance===null) baseBalance = acc ? acc.balance/100 : 0; // best available fallback
-    }
-    state.jarDailyBudget = baseBalance / daysUntilPeriodEnd(chosenStart);
-    state.jarPending = 0;
-    state.jarLastDate = chosenStart;
-    state.jarStartDateActual = chosenStart;
-    state.jarPeriodStart = defaultPeriodStart();
-    await storageSet('ms_jardailybudget', JSON.stringify(state.jarDailyBudget));
-    await storageSet('ms_jarstartdateactual', state.jarStartDateActual);
-    await storageSet('ms_jarpending', JSON.stringify(state.jarPending));
-    await storageSet('ms_jarlastdate', state.jarLastDate);
-    await storageSet('ms_jarperiodstart', state.jarPeriodStart);
-    await updateJarAccumulation(); // immediately backfill from chosenStart to today using real cached spend
-  }
-  render();
-}
-
-// Folds each fully-completed day's under/over-spend into a persisted running total,
-// exactly once per day, always measured against the SAME frozen daily budget (set once
-// when tracking was turned on) — not a number that's recalculated from today's balance.
-// Resets only when a new month starts.
-async function updateJarAccumulation(){
-  if(!state.jarEnabled) return;
-  const acc = state.accounts.find(a=>a.id===state.selectedAccount);
-  if(!acc) return;
-  const cycleStart = defaultPeriodStart();
-  const today = todayStr();
-  if(state.jarPeriodStart !== cycleStart || !state.jarLastDate || state.jarDailyBudget===null){
-    // new cycle (or first time tracking starts) — freeze a fresh daily budget, begin
-    // clean from today, no backfilling past days she wasn't tracking for
-    state.jarDailyBudget = (acc.balance/100) / daysUntilPeriodEnd();
-    state.jarPending = 0;
-    state.jarLastDate = today;
-    state.jarStartDateActual = today;
-    state.jarPeriodStart = cycleStart;
-    await storageSet('ms_jardailybudget', JSON.stringify(state.jarDailyBudget));
-    await storageSet('ms_jarstartdateactual', state.jarStartDateActual);
-    await storageSet('ms_jarpending', JSON.stringify(state.jarPending));
-    await storageSet('ms_jarlastdate', state.jarLastDate);
-    await storageSet('ms_jarperiodstart', state.jarPeriodStart);
-    return;
-  }
-  if(state.jarLastDate >= today) return; // already caught up, nothing to close out yet
-
-  const frozenBudget = state.jarDailyBudget;
-  const history = getAllHistoricalExpenses();
-  let cursor = state.jarLastDate;
-  while(cursor < today){
-    const spentThatDay = history
-      .filter(t=>todayStr(t.date)===cursor)
-      .reduce((s,t)=>s+effectiveAmountGlobal(t),0);
-    state.jarPending += (frozenBudget - spentThatDay);
-    const d = new Date(cursor+'T00:00:00'); d.setDate(d.getDate()+1);
-    cursor = todayStr(d);
-  }
-  state.jarLastDate = today;
-  await storageSet('ms_jarpending', JSON.stringify(state.jarPending));
-  await storageSet('ms_jarlastdate', state.jarLastDate);
-}
-
-// The frozen daily budget applies every day of the period, unchanged. Today's live
-// remaining (budget minus what's spent so far today) is shown flowing into the jar
-// total in real time, and gets permanently locked in once the day rolls over.
 // Eye like in password fields: open — the block is shown, crossed out — only its title is left.
 function eyeIcon(open){
   return `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -2864,7 +2520,7 @@ function setSyncText(msg){
 }
 // After new data lands in the cache, refresh what the "current period" view shows.
 function refreshCurrentView(){
-  if(state.step==='results' && state.viewTab==='current' && state.from){
+  if(state.step==='results' && state.from){
     applyPeriod(); // presets move with the calendar ("Цей місяць" ends today)
     const a = Math.floor(new Date(state.from+'T00:00:00').getTime()/1000);
     const b = Math.floor(new Date(state.to+'T23:59:59').getTime()/1000);
@@ -3464,7 +3120,7 @@ function buildTripsPanel(all){
   return p;
 }
 
-// "Менеджер категорій": every category with how many operations use it; new ones are
+// "Менеджер категорій": every category; new ones are
 // added here, and a rename changes the name everywhere (lists, charts, saved choices).
 const PENCIL_ICON = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>`;
 let editingCat = null; // category whose name is being edited inline
@@ -3494,9 +3150,6 @@ let newCatIcon = '🏷️', newCatPickerOpen = false; // the add-category form's
 function buildCustomCategoryPanel(){
   const p = document.createElement('div');
   p.className='ms-panel ms-catman';
-  const uses = {};
-  accCache().forEach(it=>{ if(it.amount<0){ const c = categoryFor(mapRawItem(it)); uses[c] = (uses[c]||0) + 1; } });
-  state.manual.forEach(m=>{ if(m.amount<0) uses[m.cat] = (uses[m.cat]||0) + 1; });
   const own = new Set(state.customCats.map(c=>c.name));
   p.innerHTML = `
     <h2>Менеджер категорій</h2>
@@ -3515,7 +3168,6 @@ function buildCustomCategoryPanel(){
   sortedCats().forEach(name=>{
     const row = document.createElement('div');
     row.className = 'ms-catman-row';
-    const n = uses[name] || 0;
     const icon = `<span class="ms-catman-ic" style="background:${(COLORS[name]||'#8C7A5C')}22">${ICONS[name]||'🏷️'}</span>`;
     if(editingCat===name){
       row.classList.add('is-editing');
@@ -3544,7 +3196,6 @@ function buildCustomCategoryPanel(){
     }else{
       row.innerHTML = `${icon}
         <span class="ms-catman-name">${escapeHtml(name)}${own.has(name) ? ' <span class="ms-tag">своя</span>' : ''}</span>
-        <span class="ms-catman-uses">${n ? n+' оп.' : '—'}</span>
         <button type="button" class="ms-icon-round" data-act="edit" title="Змінити назву та іконку" aria-label="Змінити ${escapeHtml(name)}">${PENCIL_ICON}</button>`;
       row.querySelector('[data-act="edit"]').addEventListener('click', ()=>{ editingCat = name; render(); });
     }
@@ -3570,151 +3221,6 @@ function buildCustomCategoryPanel(){
   return p;
 }
 
-function buildDailyPanel(all, from, to){
-  const p = document.createElement('div');
-  p.className='ms-panel';
-
-  const byDay = {};
-  all.forEach(t=>{
-    const key = t.date instanceof Date ? todayStr(t.date) : String(t.date).slice(0,10);
-    byDay[key] = (byDay[key]||0) + Math.abs(t.amount);
-  });
-
-  const days = [];
-  if(from && to){
-    let cur = new Date(from+'T00:00:00');
-    const end = new Date(to+'T00:00:00');
-    while(cur <= end){
-      const key = todayStr(cur);
-      days.push({key, amount: byDay[key]||0, day: cur.getDate()});
-      cur.setDate(cur.getDate()+1);
-    }
-  }
-  const max = Math.max(1, ...days.map(d=>d.amount));
-  const avg = days.length ? days.reduce((s,d)=>s+d.amount,0)/days.length : 0;
-  const lastDay = days[days.length-1];
-
-  p.innerHTML = `<h2>Витрати по днях</h2><p class="ms-hint">Торкнись або наведи курсор на стовпчик, щоб побачити суму за день.</p><div class="ms-daily-readout" id="dailyReadout"></div><div class="ms-daily-wrap"><div class="ms-daily-chart" id="dailyChart"></div></div><div class="ms-daily-avg">У середньому ${fmt(avg)} ₴/день</div>`;
-  const readout = p.querySelector('#dailyReadout');
-  const setReadout = (d)=>{
-    const dt = new Date(d.key+'T00:00:00');
-    const dstr = dt.toLocaleDateString('uk-UA',{day:'2-digit',month:'long'});
-    readout.innerHTML = d.amount>0 ? `${dstr}: <b>${fmt(d.amount)} ₴</b>` : `${dstr}: витрат не було`;
-  };
-  const chart = p.querySelector('#dailyChart');
-  let selectedCol = null;
-  days.forEach(d=>{
-    const col = document.createElement('div');
-    col.className='ms-daily-col';
-    const h = Math.round((d.amount/max)*100);
-    col.innerHTML = `<div class="ms-daily-bar${d.amount===0?' empty':''}" style="height:${Math.max(h,2)}px"></div><div class="ms-daily-lbl">${String(d.day).padStart(2,'0')}</div>`;
-    col.addEventListener('mouseenter', ()=>setReadout(d));
-    col.addEventListener('click', ()=>{
-      if(selectedCol) selectedCol.classList.remove('selected');
-      col.classList.add('selected');
-      selectedCol = col;
-      setReadout(d);
-    });
-    chart.appendChild(col);
-  });
-  if(lastDay){ setReadout(lastDay); }
-  return p;
-}
-
-function buildDebtsPanel(){
-  const p = document.createElement('div');
-  p.className='ms-panel';
-
-  const openDebts = state.debts.filter(d=>d.status==='open');
-  const closedDebts = state.debts.filter(d=>d.status==='closed');
-  const totalOwed = openDebts.reduce((s,d)=>s+d.remaining,0);
-
-  const incoming = state.txs.filter(t=>t.amount>0
-    && !INCOMING_SELF_KEYWORDS.some(k=>t.desc.includes(k))
-    && !state.usedIncoming[txKey(t)]);
-
-  p.innerHTML = `
-    <h2>Борги — хто мені винен</h2>
-    <p class="ms-hint">Це окремо від трат: позначені позики (кнопка «позика ⤴» в таблиці операцій) сюди перенеслись і не рахуються у витратах. Коли бачиш надходження, яким гасять борг — закрий ним потрібний борг нижче.</p>
-    <div style="margin-bottom:14px;font-size:13px;color:var(--muted)">Разом винні тобі: <b style="color:var(--gold);font-family:var(--font-mono)">${fmt(totalOwed)} ₴</b></div>
-    <div id="openDebtsList"></div>
-    ${incoming.length ? `<h2 style="margin-top:18px;font-size:14px">Надходження за період, які можна закрити боргом</h2><div id="incomingList"></div>` : ''}
-    ${closedDebts.length ? `<h2 style="margin-top:18px;font-size:14px">Повернуто</h2><div id="closedDebtsList"></div>` : ''}
-    <h2 style="margin-top:18px;font-size:14px">Додати позику вручну (готівкою або заднім числом)</h2>
-    <div class="ms-manual-form">
-      <div class="ms-field" style="max-width:140px"><label>Дата</label><input type="date" id="dDate" value="${todayStr()}"></div>
-      <div class="ms-field"><label>Кому</label><input type="text" id="dPerson" placeholder="Ім'я"></div>
-      <div class="ms-field" style="max-width:120px"><label>Сума</label><input type="text" id="dAmount" placeholder="1000"></div>
-      <button class="ms-btn" id="dAdd" style="align-self:flex-end">Додати борг</button>
-    </div>
-  `;
-
-  const openList = p.querySelector('#openDebtsList');
-  if(openDebts.length===0){
-    openList.innerHTML = '<p class="ms-hint" style="margin:0">Відкритих боргів немає.</p>';
-  }
-  openDebts.forEach(d=>{
-    const row = document.createElement('div');
-    row.className='ms-debt-row';
-    row.innerHTML = `<span class="ms-debt-person">${escapeHtml(d.person)}</span>
-      <span class="ms-debt-meta">дав(ла) ${fmt(d.amount)} ₴ · ${d.dateGiven}</span>
-      <span class="ms-debt-remain">${fmt(d.remaining)} ₴</span>`;
-    const closeBtn = document.createElement('button');
-    closeBtn.className='ms-btn secondary';
-    closeBtn.textContent='Повернули повністю';
-    closeBtn.addEventListener('click', ()=>closeDebtManually(d.id));
-    row.appendChild(closeBtn);
-    openList.appendChild(row);
-  });
-
-  const incList = p.querySelector('#incomingList');
-  if(incList){
-    incoming.forEach(t=>{
-      const row = document.createElement('div');
-      row.className='ms-inc-row';
-      const dateStr = t.date instanceof Date ? dtStr(t.date) : t.date;
-      row.innerHTML = `<span style="min-width:60px">${dateStr}</span><span style="flex:1">${escapeHtml(t.desc)}</span><span class="ms-amt-pos">+${fmt(t.amount)} ₴</span>`;
-      if(openDebts.length){
-        const sel = document.createElement('select');
-        sel.className='ms-cat-select';
-        openDebts.forEach(d=>{
-          const opt = document.createElement('option');
-          opt.value=d.id; opt.textContent=`${d.person} (${fmt(d.remaining)} ₴)`;
-          sel.appendChild(opt);
-        });
-        const btn = document.createElement('button');
-        btn.className='ms-loan-btn';
-        btn.textContent='Закрити цим борг';
-        btn.addEventListener('click', ()=>closeDebtWithIncoming(sel.value, t));
-        row.appendChild(sel);
-        row.appendChild(btn);
-      }
-      incList.appendChild(row);
-    });
-  }
-
-  const closedList = p.querySelector('#closedDebtsList');
-  if(closedList){
-    closedDebts.forEach(d=>{
-      const row = document.createElement('div');
-      row.className='ms-debt-row ms-debt-closed';
-      row.innerHTML = `<span class="ms-debt-person">${escapeHtml(d.person)}</span>
-        <span class="ms-debt-meta">${fmt(d.amount)} ₴ · дано ${d.dateGiven}</span>
-        <span class="ms-debt-remain">повернуто</span>`;
-      closedList.appendChild(row);
-    });
-  }
-
-  p.querySelector('#dAdd').addEventListener('click', ()=>{
-    const date = p.querySelector('#dDate').value;
-    const person = p.querySelector('#dPerson').value.trim();
-    const amt = parseFloat(p.querySelector('#dAmount').value.replace(',','.'));
-    if(!person || isNaN(amt)) return;
-    addManualDebt(person, amt, date);
-  });
-
-  return p;
-}
 
 function buildConicGradient(catList, total){
   if(!total) return '#E4DCCB 0deg 360deg';
