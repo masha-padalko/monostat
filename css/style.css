@@ -461,8 +461,8 @@
   .ms-period-custom .ms-btn{padding:9px 14px;font-size:13px;}
 
   /* pencil next to an operation she entered by hand */
-  .ms-manual{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;margin-left:6px;border-radius:50%;
-    background:var(--panel-hi);color:var(--gold);vertical-align:-4px;}
+  .ms-manual{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:6px;background:var(--panel-hi);color:var(--muted);
+    font-family:var(--font-body);font-size:10px;font-weight:500;letter-spacing:.04em;text-transform:uppercase;vertical-align:2px;}
 
   /* right column ("Сьогодні / Вчора") about 1.5x as wide as before; left one narrower */
   .ms-overview{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(320px,1fr);gap:14px;align-items:start;}
@@ -501,7 +501,7 @@
     .ms-overview{display:flex;flex-direction:column;align-items:stretch;}
     .ms-ov-general .ms-hero{flex-direction:column;align-items:center;}
     .ms-ov-main,.ms-ov-side,.ms-ov-cardrow{display:contents;}
-    .ms-ov-card{order:1;} .ms-ov-budget{order:3;} .ms-ov-today{order:4;} .ms-ov-general{order:5;} .ms-ov-ops{order:6;} .ms-ov-recurring{order:7;}
+    .ms-ov-card{order:1;} .ms-ov-budget{order:3;} .ms-ov-today{order:4;} .ms-ov-recurring{order:5;} .ms-ov-general{order:6;} .ms-ov-ops{order:7;}
     .ms-ov-card .ms-balance-card{max-width:440px;height:auto;aspect-ratio:auto;}
   }
   @media (max-width:760px){

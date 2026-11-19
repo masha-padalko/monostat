@@ -1436,7 +1436,7 @@ function chev(open){
 function manualDate(m){ return m.time ? new Date(m.date+'T'+m.time) : new Date(m.date); }
 function nowHM(){ const d = new Date(); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
 // Marks an operation she typed in herself (cash etc.), not one from Monobank.
-const MANUAL_BADGE = `<span class="ms-manual" title="Внесено вручну" aria-label="Внесено вручну" role="img"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg></span>`;
+const MANUAL_BADGE = `<span class="ms-manual" title="Внесено вручну, не з Monobank">вручну</span>`;
 const CALENDAR_ICON = `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="4"/><path d="M8 3v4M16 3v4M3.5 10h17"/></svg>`;
 const CHEVRON_ICON = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 10l5 5 5-5"/></svg>`;
 // The period pill: "📅 1–13 лист. 2026 ⌄" — opens presets and her own dates.
@@ -1592,12 +1592,12 @@ function buildDayTxList(label, list){
     time.style.fontFamily = 'var(--font-mono)';
     time.style.fontSize = '11px';
     time.style.minWidth = '38px';
-    if(t.manual && !t.manualTime) time.innerHTML = MANUAL_BADGE; // older entry without a time: the pencil fills the slot
+    if(t.manual && !t.manualTime) time.textContent = '—'; // older entry without a time (the tag after the name says it's manual)
     else time.textContent = t.date.toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'});
     const name = document.createElement('span');
     name.className = 'ms-today-cat-name';
     name.textContent = t.desc;
-    if(t.manual && t.manualTime) name.insertAdjacentHTML('beforeend', MANUAL_BADGE);
+    if(t.manual) name.insertAdjacentHTML('beforeend', MANUAL_BADGE);
     const amt = document.createElement('span');
     amt.className = 'ms-today-cat-amt';
     const foreignCur = t.currency && t.currency !== curCode();
@@ -2099,10 +2099,10 @@ function resultsPanel(){
 
   if(tab==='overview'){
 
-    // left: bank card (right under the heading) + "how much per day" side by side,
-    // "Загальна картина" and "Всі операції" under them; right: "Зараз" (today/yesterday), "Регулярні платежі".
+    // left: bank card + "how much per day" side by side, "Сьогодні / Вчора" and "Регулярні платежі" under them;
+    // right: spending by category ("Загальна картина") and "Всі операції".
     // The period picker sits to the right of the page heading.
-    // On a phone it's one column: card, period, per day, Зараз, Загальна картина, Всі операції, Регулярні платежі.
+    // On a phone it's one column in that same order: left column first, then the right one.
     const panelRecurring = buildRecurringPaymentsPanel();
     const overview = document.createElement('div');
     overview.className = 'ms-overview';
@@ -2119,15 +2119,15 @@ function resultsPanel(){
     cardRow.appendChild(panelBalance);
     cardRow.appendChild(panelDailyBudget);
     main.appendChild(cardRow);
-    main.appendChild(panel1);
-    panel2.classList.add('ms-ov-ops'); // "Всі операції" of the chosen period (+ manual entry)
-    main.appendChild(panel2);
+    main.appendChild(panelToday);
+    if(!panelRecurring.hidden) main.appendChild(panelRecurring);
     const side = document.createElement('div');
     side.className = 'ms-ov-side';
     const heroSlot = document.getElementById('ms-hero-slot');
     if(heroSlot) heroSlot.appendChild(panelRange); else side.appendChild(panelRange);
-    side.appendChild(panelToday);
-    if(!panelRecurring.hidden) side.appendChild(panelRecurring);
+    side.appendChild(panel1);
+    panel2.classList.add('ms-ov-ops'); // "Всі операції" of the chosen period (+ manual entry)
+    side.appendChild(panel2);
     overview.appendChild(main);
     overview.appendChild(side);
     wrap.appendChild(overview);
