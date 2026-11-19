@@ -149,7 +149,7 @@
     background:var(--panel);
     box-shadow: inset 0 2px 6px rgba(74,54,35,0.08), 0 1px 2px rgba(255,255,255,0.6);
   }
-  .ms-donut-center .amt{font-family:var(--font-display);font-size:19px;font-weight:600;}
+  .ms-donut-center .amt{font-family:var(--font-display);font-size:18px;font-weight:600;white-space:nowrap;}
   .ms-donut-center .lbl{font-size:10px;color:var(--muted);margin-top:2px;letter-spacing:.03em;}
   .ms-legend{display:flex;flex-direction:column;gap:3px;width:100%;}
   .ms-legend-row{display:flex;align-items:center;gap:9px;font-size:13px;padding:8px 8px;border-radius:9px;transition:background .12s;}
@@ -263,8 +263,9 @@
   .ms-bc-chip::before{left:0;right:0;top:50%;height:1px;}
   .ms-bc-chip::after{top:0;bottom:0;left:35%;width:1px;box-shadow:12px 0 0 rgba(60,60,66,0.45);}
   .ms-bc-nfc{width:26px;height:26px;color:rgba(255,255,255,0.75);}
-  .ms-bc-bottom{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;}
-  .ms-bc-cashback{display:flex;align-items:center;gap:7px;padding:8px 12px;border-radius:14px;background:rgba(255,255,255,0.09);border:1px solid rgba(255,255,255,0.14);font-family:var(--font-mono);white-space:nowrap;}
+  .ms-bc-bottom{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;}
+  .ms-bc-bottom-main{min-width:0;}
+  .ms-bc-cashback{display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-width:96px;margin-left:auto;padding:9px 11px;border-radius:14px;background:rgba(255,255,255,0.09);border:1px solid rgba(255,255,255,0.14);font-family:var(--font-mono);white-space:nowrap;}
   .ms-bc-cashback svg{width:18px;height:18px;color:#e8c46a;flex-shrink:0;}
   .ms-bc-cashback .ms-bc-cb-net{font-size:15px;font-weight:600;color:#9fd8a8;}
   .ms-bc-cb-info{position:relative;width:18px;height:18px;border-radius:50%;border:1px solid rgba(255,255,255,0.4);color:rgba(255,255,255,0.75);
@@ -365,6 +366,10 @@
   .ms-txrow:hover{background:var(--panel-hi);}
   .ms-txrow:focus-visible{outline:2px solid var(--gold);outline-offset:-2px;}
   .ms-txicon{flex:0 0 36px;width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px;}
+  .ms-txmono{font-family:var(--font-body);font-size:12px;font-weight:700;letter-spacing:-.02em;}
+  /* the "⋯" shows the row opens (category, trip, note…) — faint, clearer on hover/when open */
+  .ms-txmore{flex:0 0 auto;display:inline-flex;color:var(--muted);opacity:.45;transition:opacity .15s,color .15s;}
+  .ms-txrow:hover .ms-txmore,.ms-txitem.is-open .ms-txmore,.ms-txrow:focus-visible .ms-txmore{opacity:1;color:var(--gold);}
   .ms-txmain{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;}
   .ms-txdesc{font-size:14px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .ms-txsub,.ms-txnote{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -483,7 +488,7 @@
   .ms-ov-card .ms-bc-sub{font-size:13.5px;margin-top:4px;}
   .ms-ov-card .ms-bc-chip{transform:scale(.8);transform-origin:left center;}
   .ms-ov-card .ms-bc-nfc{width:21px;height:21px;}
-  .ms-ov-card .ms-bc-cashback{padding:6px 9px;border-radius:11px;}
+  .ms-ov-card .ms-bc-cashback{padding:9px 11px;border-radius:12px;}
   .ms-ov-card .ms-bc-cashback .ms-bc-cb-net{font-size:16px;}
   .ms-ov-budget{padding:16px 18px !important;}
   .ms-ov-budget h2{margin-bottom:4px;}
@@ -501,7 +506,7 @@
     .ms-overview{display:flex;flex-direction:column;align-items:stretch;}
     .ms-ov-general .ms-hero{flex-direction:column;align-items:center;}
     .ms-ov-main,.ms-ov-side,.ms-ov-cardrow{display:contents;}
-    .ms-ov-card{order:1;} .ms-ov-budget{order:3;} .ms-ov-today{order:4;} .ms-ov-recurring{order:5;} .ms-ov-general{order:6;} .ms-ov-ops{order:7;}
+    .ms-ov-card{order:1;} .ms-ov-budget{order:3;} .ms-ov-today{order:4;} .ms-ov-ops{order:5;} .ms-ov-general{order:6;} .ms-ov-recurring{order:7;}
     .ms-ov-card .ms-balance-card{max-width:440px;height:auto;aspect-ratio:auto;}
   }
   @media (max-width:760px){
@@ -598,9 +603,11 @@
   /* cashback under 100 ₴ (Monobank pays out from 100): muted, with a small "< 100" */
   .ms-bc-cashback.is-low .ms-bc-cb-net{color:rgba(255,255,255,0.6);}
   .ms-bc-cashback.is-low svg{color:rgba(232,196,106,0.55);}
-  .ms-bc-cb-low{font-size:10px;letter-spacing:.04em;color:rgba(255,255,255,0.5);border:1px solid rgba(255,255,255,0.22);border-radius:6px;padding:1px 4px;}
+  .ms-bc-cb-low{font-family:var(--font-body);font-size:11px;color:rgba(255,255,255,0.5);}
+  .ms-bc-cb-top{display:flex;align-items:center;justify-content:space-between;align-self:stretch;gap:8px;}
 
   /* "Всі операції": pencil (manual entry) turns into ✕ while the form is open */
+  .ms-manual-slot{margin-left:0;font-size:9px;padding:1px 4px;}
   .ms-manual-toggle .ic-close{display:none;}
   .ms-manual-toggle[aria-expanded="true"] .ic-open{display:none;}
   .ms-manual-toggle[aria-expanded="true"] .ic-close{display:block;}

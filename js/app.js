@@ -64,7 +64,7 @@ async function renameCategory(oldName, newName){
   state.manual.forEach(m=>{ m.cat = re(m.cat); });
   if(state.historySearch.cat===oldName) state.historySearch.cat = newName;
   if(catIcons[oldName]){ catIcons[newName] = catIcons[oldName]; delete catIcons[oldName]; await storageSet('ms_caticons', JSON.stringify(catIcons)); }
-  if(state.catOff[oldName]){ state.catOff[newName] = true; delete state.catOff[oldName]; await storageSet('ms_catoff', JSON.stringify(state.catOff)); }
+  if(oldName in state.catOff){ state.catOff[newName] = state.catOff[oldName]; delete state.catOff[oldName]; await storageSet('ms_catoff', JSON.stringify(state.catOff)); }
   applyCatRenames();
   await storageSet('ms_catrenames', JSON.stringify(catRenames));
   await persistOverrides(); await persistTxCategoryOverride(); await persistManual();
@@ -1435,6 +1435,20 @@ function chev(open){
 // (older entries keep exactly the date they always had, so their saved notes/marks still match).
 function manualDate(m){ return m.time ? new Date(m.date+'T'+m.time) : new Date(m.date); }
 function nowHM(){ const d = new Date(); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+// Logo of a known shop in the operations list (js/brands.js): the brand's glyph on its colour,
+// or a letter badge when there is no logo; otherwise the category emoji as before.
+function merchantIcon(desc, color, emoji){
+  const B = window.MonoStatBrands, d = ' '+(desc||'').toLowerCase()+' ';
+  const has = b => b.kw.some(k=>d.includes(k));
+  const logo = B && B.logos.find(has);
+  if(logo){
+    const h = logo.hex, lum = (0.299*parseInt(h.slice(0,2),16) + 0.587*parseInt(h.slice(2,4),16) + 0.114*parseInt(h.slice(4,6),16));
+    return `<span class="ms-txicon ms-txlogo" style="background:#${h};color:${lum>200?'#2A2A2A':'#fff'}" title="${escapeHtml(logo.title)}"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="${logo.path}"/></svg></span>`;
+  }
+  const mono = B && B.monograms.find(has);
+  if(mono) return `<span class="ms-txicon ms-txmono" style="background:${color}22;color:${color}" title="${escapeHtml(mono.title)}">${escapeHtml(mono.text)}</span>`;
+  return `<span class="ms-txicon" style="background:${color}22;color:${color}">${emoji}</span>`;
+}
 // Marks an operation she typed in herself (cash etc.), not one from Monobank.
 const MANUAL_BADGE = `<span class="ms-manual" title="Внесено вручну, не з Monobank">вручну</span>`;
 const CALENDAR_ICON = `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="4"/><path d="M8 3v4M16 3v4M3.5 10h17"/></svg>`;
@@ -1592,12 +1606,12 @@ function buildDayTxList(label, list){
     time.style.fontFamily = 'var(--font-mono)';
     time.style.fontSize = '11px';
     time.style.minWidth = '38px';
-    if(t.manual && !t.manualTime) time.textContent = '—'; // older entry without a time (the tag after the name says it's manual)
+    if(t.manual && !t.manualTime) time.innerHTML = MANUAL_BADGE.replace('ms-manual','ms-manual ms-manual-slot'); // no time saved: the tag takes its place
     else time.textContent = t.date.toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'});
     const name = document.createElement('span');
     name.className = 'ms-today-cat-name';
     name.textContent = t.desc;
-    if(t.manual) name.insertAdjacentHTML('beforeend', MANUAL_BADGE);
+    if(t.manual && t.manualTime) name.insertAdjacentHTML('beforeend', MANUAL_BADGE);
     const amt = document.createElement('span');
     amt.className = 'ms-today-cat-amt';
     const foreignCur = t.currency && t.currency !== curCode();
@@ -1694,7 +1708,8 @@ function resultsPanel(){
   // transfers to people aren't real spending — the donut, its percentages and the daily average ignore them
   const TRANSFERS_CAT = cn('перекази людям');
   // categories she switched off in the list (checkbox) leave the donut and the total, like transfers
-  const isOff = c => c===TRANSFERS_CAT || !!state.catOff[c];
+  // catOff[c]: true = off, false = switched on by her; transfers are off unless she ticks them
+  const isOff = c => (c in state.catOff) ? !!state.catOff[c] : c===TRANSFERS_CAT;
   const cleanTotal = total - Object.entries(byCat).reduce((s,[c,v])=>s+(isOff(c)?v:0), 0);
   const avgPerDay = Math.abs(cleanTotal)/periodDays;
 
@@ -1707,10 +1722,8 @@ function resultsPanel(){
       <div class="ms-donut-wrap">
         <div class="ms-donut" style="background:conic-gradient(${donutGradient})"></div>
         <div class="ms-donut-center">
-          <div class="amt">${fmt(cleanTotal)}</div>
-          <div class="lbl">${curSym()} витрачено</div>
+          <div class="amt">${fmt(cleanTotal)} ${curSym()}</div>
           <div class="lbl" style="margin-top:2px;opacity:.75">${fmtEur(cleanTotal, curCode()).trim()}</div>
-          <div class="lbl" style="margin-top:2px;opacity:.6;font-size:10px">без переказів людям${Object.keys(byCat).some(c=>c!==TRANSFERS_CAT && state.catOff[c]) ? ' і вимкнених' : ''}</div>
         </div>
       </div>
       <div class="ms-legend" id="legendWrap"></div>
@@ -1726,23 +1739,24 @@ function resultsPanel(){
   catList.forEach(([cat,sum])=>{
     const row = document.createElement('div');
     row.className='ms-legend-row ms-legend-row-clickable';
-    const isTransfers = cat===TRANSFERS_CAT;
-    const off = !isTransfers && !!state.catOff[cat];
-    const pct = isTransfers || off ? '' : (cleanTotal ? ((Math.abs(sum)/Math.abs(cleanTotal))*100).toFixed(1)+'%' : '0.0%');
+    const off = isOff(cat);
+    const pct = off ? '' : (cleanTotal ? ((Math.abs(sum)/Math.abs(cleanTotal))*100).toFixed(1)+'%' : '0.0%');
     const expanded = !!state.expandedCats[cat];
     if(off) row.classList.add('is-off');
-    row.innerHTML = `${isTransfers ? '<span class="ms-legend-chk-space"></span>' : `<input type="checkbox" class="ms-legend-chk"${off?'':' checked'} title="${off?'Увімкнути':'Вимкнути'}: рахувати цю категорію в сумі та на діаграмі" aria-label="Рахувати категорію ${escapeHtml(cat)}">`}
+    row.innerHTML = `<input type="checkbox" class="ms-legend-chk"${off?'':' checked'} title="${off?'Увімкнути':'Вимкнути'}: рахувати цю категорію в сумі та на діаграмі" aria-label="Рахувати категорію ${escapeHtml(cat)}">
       <span class="ms-legend-chevron">${chev(expanded)}</span>
       <span class="ms-dot" style="background:${COLORS[cat]||'#666'}"></span>
       <span class="ms-legend-icon">${ICONS[cat]||'❓'}</span>
       <span class="ms-legend-cat">${cat}</span>
       <span class="ms-legend-amt">${fmt(sum)} ${curSym()}</span>
-      <span class="ms-legend-pct" title="${isTransfers||off?'Не входить у суму на діаграмі':''}">${isTransfers||off?'поза сумою':pct}</span>`;
+      <span class="ms-legend-pct" title="${off?'Не входить у суму на діаграмі':''}">${off?'поза сумою':pct}</span>`;
     const chk = row.querySelector('.ms-legend-chk');
     if(chk){
       chk.addEventListener('click', e=>e.stopPropagation()); // the row itself unfolds the operations
       chk.addEventListener('change', async e=>{
-        if(e.target.checked) delete state.catOff[cat]; else state.catOff[cat] = true;
+        // remember only what differs from the default (transfers off, everything else on)
+        const def = cat===TRANSFERS_CAT;
+        if(!e.target.checked===def) delete state.catOff[cat]; else state.catOff[cat] = !e.target.checked;
         render();
         await storageSet('ms_catoff', JSON.stringify(state.catOff));
       });
@@ -1840,7 +1854,7 @@ function resultsPanel(){
     const time = t.manual && !t.manualTime ? '' : t.date.toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'})+' · ';
     const foreign = !t.manual && t.currency && t.currency!==curCode() && t.operationAmount;
     row.innerHTML = `
-      <span class="ms-txicon" style="background:${color}22;color:${color}">${ICONS[t.cat]||'•'}</span>
+      ${t.manual ? `<span class="ms-txicon" style="background:${color}22;color:${color}">${ICONS[t.cat]||'•'}</span>` : merchantIcon(t.desc, color, ICONS[t.cat]||'•')}
       <span class="ms-txmain">
         <span class="ms-txdesc"></span>
         <span class="ms-txsub">${time}${escapeHtml(t.cat)}${tripName?` · ✈️ ${escapeHtml(tripName)}`:''}${isNotExpense?' · не витрата':''}</span>
@@ -1849,7 +1863,11 @@ function resultsPanel(){
         <span class="ms-amt-neg">−${fmt(t.amount)}</span>
         ${t.share ? `<small>з −${fmt(t.fullAmount)} · ${Math.round(t.share*100)}%</small>` : ''}
         ${foreign ? `<small>${fmt(Math.abs(t.operationAmount))} ${CURRENCY_SYMBOLS[t.currency]||''}</small>` : ''}
-      </span>`;
+      </span>
+      <span class="ms-txmore" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg></span>`;
+    row.setAttribute('role','button');
+    row.setAttribute('aria-expanded', String(!!(state.expandedTx && state.expandedTx[key])));
+    row.title = 'Відкрити: категорія, поїздка, нотатка…';
     row.querySelector('.ms-txdesc').textContent = t.desc + (existingNote ? ' 📝' : '');
     if(t.manual) row.querySelector('.ms-txdesc').insertAdjacentHTML('beforeend', MANUAL_BADGE);
     if(t.bankComment || existingNote){
@@ -1862,6 +1880,7 @@ function resultsPanel(){
       state.expandedTx = state.expandedTx || {};
       const open = !item.classList.contains('is-open');
       item.classList.toggle('is-open', open);
+      row.setAttribute('aria-expanded', String(open));
       if(open) state.expandedTx[key] = true; else delete state.expandedTx[key];
     };
     row.addEventListener('click', toggle);
@@ -2099,8 +2118,8 @@ function resultsPanel(){
 
   if(tab==='overview'){
 
-    // left: bank card + "how much per day" side by side, "Сьогодні / Вчора" and "Регулярні платежі" under them;
-    // right: spending by category ("Загальна картина") and "Всі операції".
+    // left: bank card + "how much per day" side by side, "Сьогодні / Вчора" and "Всі операції" under them;
+    // right: spending by category ("Загальна картина") and "Регулярні платежі".
     // The period picker sits to the right of the page heading.
     // On a phone it's one column in that same order: left column first, then the right one.
     const panelRecurring = buildRecurringPaymentsPanel();
@@ -2120,14 +2139,14 @@ function resultsPanel(){
     cardRow.appendChild(panelDailyBudget);
     main.appendChild(cardRow);
     main.appendChild(panelToday);
-    if(!panelRecurring.hidden) main.appendChild(panelRecurring);
+    panel2.classList.add('ms-ov-ops'); // "Всі операції" of the chosen period (+ manual entry)
+    main.appendChild(panel2);
     const side = document.createElement('div');
     side.className = 'ms-ov-side';
     const heroSlot = document.getElementById('ms-hero-slot');
     if(heroSlot) heroSlot.appendChild(panelRange); else side.appendChild(panelRange);
     side.appendChild(panel1);
-    panel2.classList.add('ms-ov-ops'); // "Всі операції" of the chosen period (+ manual entry)
-    side.appendChild(panel2);
+    if(!panelRecurring.hidden) side.appendChild(panelRecurring);
     overview.appendChild(main);
     overview.appendChild(side);
     wrap.appendChild(overview);
@@ -2352,9 +2371,12 @@ function buildBalancePanel(){
       const tipText = ready ? 'Кешбек після податку, який буде зараховано на картку'
         : `Кешбек ще менше 100 ₴ (${fmt(accCb)} ₴) — вивести на картку можна від 100 ₴`;
       cashbackPill = `<div class="ms-bc-cashback${ready?'':' is-low'}">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v4h-4"/><path d="M9.5 9.5h3.2a1.6 1.6 0 0 1 0 3.2h-1.4a1.6 1.6 0 0 0 0 3.2h3.2M12 8v1.5M12 15.9v1.6"/></svg>
-          <span class="ms-bc-cb-net">${fmt(ready ? netCb : accCb)} ${curSym()}</span>${ready ? '' : '<span class="ms-bc-cb-low">&lt; 100</span>'}
-          <span class="ms-bc-cb-info" tabindex="0" role="img" aria-label="${tipText}" data-tip="${tipText}">i</span>
+          <span class="ms-bc-cb-top">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v4h-4"/><path d="M9.5 9.5h3.2a1.6 1.6 0 0 1 0 3.2h-1.4a1.6 1.6 0 0 0 0 3.2h3.2M12 8v1.5M12 15.9v1.6"/></svg>
+            <span class="ms-bc-cb-info" tabindex="0" role="img" aria-label="${tipText}" data-tip="${tipText}">i</span>
+          </span>
+          <span class="ms-bc-cb-net">${fmt(ready ? netCb : accCb)} ${curSym()}</span>
+          ${ready ? '' : '<span class="ms-bc-cb-low">менше 100 ₴</span>'}
         </div>`;
     }
   }
