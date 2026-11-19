@@ -75,6 +75,7 @@ async function renameCategory(oldName, newName){
   state.manual.forEach(m=>{ m.cat = re(m.cat); });
   if(state.historySearch.cat===oldName) state.historySearch.cat = newName;
   if(catIcons[oldName]){ catIcons[newName] = catIcons[oldName]; delete catIcons[oldName]; await storageSet('ms_caticons', JSON.stringify(catIcons)); }
+  if(state.catOff[oldName]){ state.catOff[newName] = true; delete state.catOff[oldName]; await storageSet('ms_catoff', JSON.stringify(state.catOff)); }
   applyCatRenames();
   await storageSet('ms_catrenames', JSON.stringify(catRenames));
   await persistOverrides(); await persistTxCategoryOverride(); await persistManual();
@@ -91,7 +92,7 @@ function frequentCats(){
   const counts = {};
   const bump = c=>{ if(CATS.includes(c)) counts[c] = (counts[c]||0) + 1; };
   accCache().forEach(it=>{ if(it.amount<0 && it.time*1000>=since) bump(categoryFor(mapRawItem(it))); });
-  state.manual.forEach(m=>{ if(m.amount<0 && new Date(m.date).getTime()>=since) bump(m.cat); });
+  state.manual.forEach(m=>{ if(m.amount<0 && manualDate(m).getTime()>=since) bump(m.cat); });
   const total = Object.values(counts).reduce((sum,n)=>sum+n, 0);
   frequentCatsMemo = total < 10 ? [] : Object.entries(counts)
     .sort((a,b)=>b[1]-a[1] || a[0].localeCompare(b[0],'uk'))
@@ -259,6 +260,7 @@ let state = {
   jarAutoCheckedThisLoad: false, // ensures the background jar catch-up only runs once per page load, never re-fires mid-interaction
   period: {preset:'month'}, // chosen period (ms_period): a preset id or {preset:'custom', from} — a custom period always ends today
   periodOpen: false,         // period dropdown unfolded
+  catOff: {},            // categories switched off in "Загальна картина" (ms_catoff): not in the donut/total
   cashbackAnchor: null, // {amount, time}: cashback she typed in from the Monobank app (ms_cashbackanchor)
   dailyBudgetEndDate: null, // selected date through which to spread the current card balance
   recurringHidden: [], // ids of recurring-payment rows the user hid (ms_recurring_hidden)
@@ -456,6 +458,7 @@ async function loadPersisted(){
   if(migratedCategoryOverrides) await persistOverrides();
   if(migratedTransactionCategories) await persistTxCategoryOverride();
   if(migratedManualCategories) await persistManual();
+  const cof = await storageGet('ms_catoff'); if(cof){ try{ state.catOff = JSON.parse(cof) || {}; }catch(e){} }
   const cic = await storageGet('ms_caticons');
   if(cic){ try{ catIcons = JSON.parse(cic) || {}; }catch(e){} }
   const crn = await storageGet('ms_catrenames');
@@ -1392,7 +1395,7 @@ function getAllHistoricalExpenses(){
     .map(t=>applyShare({...t, cat: categoryFor(t)}));
   const fromManual = state.manual
     .filter(m=>m.amount<0)
-    .map(m=>({date:new Date(m.date), desc:m.desc, amount:m.amount, cat:m.cat, manual:true}));
+    .map(m=>({date:manualDate(m), desc:m.desc, amount:m.amount, cat:m.cat, manual:true, manualTime:!!m.time}));
   return fromCache.concat(fromManual);
 }
 
@@ -1632,6 +1635,10 @@ function accountsPanel(){
 function chev(open){
   return `<svg class="ms-chev${open?' is-open':''}" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>`;
 }
+// Date of a manual entry: with the time she entered (newer entries), else the bare day
+// (older entries keep exactly the date they always had, so their saved notes/marks still match).
+function manualDate(m){ return m.time ? new Date(m.date+'T'+m.time) : new Date(m.date); }
+function nowHM(){ const d = new Date(); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
 // Marks an operation she typed in herself (cash etc.), not one from Monobank.
 const MANUAL_BADGE = `<span class="ms-manual" title="Внесено вручну" aria-label="Внесено вручну" role="img"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg></span>`;
 const CALENDAR_ICON = `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="4"/><path d="M8 3v4M16 3v4M3.5 10h17"/></svg>`;
@@ -1789,11 +1796,12 @@ function buildDayTxList(label, list){
     time.style.fontFamily = 'var(--font-mono)';
     time.style.fontSize = '11px';
     time.style.minWidth = '38px';
-    time.textContent = t.manual ? '' : t.date.toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'});
+    if(t.manual && !t.manualTime) time.innerHTML = MANUAL_BADGE; // older entry without a time: the pencil fills the slot
+    else time.textContent = t.date.toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'});
     const name = document.createElement('span');
     name.className = 'ms-today-cat-name';
     name.textContent = t.desc;
-    if(t.manual) name.insertAdjacentHTML('beforeend', MANUAL_BADGE);
+    if(t.manual && t.manualTime) name.insertAdjacentHTML('beforeend', MANUAL_BADGE);
     const amt = document.createElement('span');
     amt.className = 'ms-today-cat-amt';
     const foreignCur = t.currency && t.currency !== curCode();
@@ -1851,7 +1859,7 @@ function resultsPanel(){
   }));
   const manualExpenses = state.manual.filter(m=>{
     if(m.amount>=0) return false;
-    const d = new Date(m.date).getTime();
+    const d = manualDate(m).getTime();
     if(isPrevTab){
       const {start,end} = getPrevMonthRange();
       end.setHours(23,59,59,999);
@@ -1862,7 +1870,7 @@ function resultsPanel(){
     const periodEnd = new Date(state.to+'T23:59:59').getTime();
     return d>=periodStart && d<=periodEnd;
   });
-  const all = expenses.concat(manualExpenses.map(m=>({date:new Date(m.date),desc:m.desc,amount:m.amount,cat:m.cat,manual:true,manualIndex:state.manual.indexOf(m)})));
+  const all = expenses.concat(manualExpenses.map(m=>({date:manualDate(m),desc:m.desc,amount:m.amount,cat:m.cat,manual:true,manualTime:!!m.time,manualIndex:state.manual.indexOf(m)})));
 
   const byCat = {};
   all.forEach(t=>{ byCat[t.cat] = (byCat[t.cat]||0) + t.amount; });
@@ -1902,12 +1910,14 @@ function resultsPanel(){
   }
   // transfers to people aren't real spending — the donut, its percentages and the daily average ignore them
   const TRANSFERS_CAT = cn('перекази людям');
-  const cleanTotal = total - (byCat[TRANSFERS_CAT]||0);
+  // categories she switched off in the list (checkbox) leave the donut and the total, like transfers
+  const isOff = c => c===TRANSFERS_CAT || !!state.catOff[c];
+  const cleanTotal = total - Object.entries(byCat).reduce((s,[c,v])=>s+(isOff(c)?v:0), 0);
   const avgPerDay = Math.abs(cleanTotal)/periodDays;
 
   const panel1 = document.createElement('div');
   panel1.className='ms-panel';
-  const donutGradient = buildConicGradient(catList.filter(([c])=>c!==TRANSFERS_CAT), cleanTotal);
+  const donutGradient = buildConicGradient(catList.filter(([c])=>!isOff(c)), cleanTotal);
 
   panel1.innerHTML = `
     <div class="ms-hero">
@@ -1917,7 +1927,7 @@ function resultsPanel(){
           <div class="amt">${fmt(cleanTotal)}</div>
           <div class="lbl">${curSym()} витрачено</div>
           <div class="lbl" style="margin-top:2px;opacity:.75">${fmtEur(cleanTotal, curCode()).trim()}</div>
-          <div class="lbl" style="margin-top:2px;opacity:.6;font-size:10px">без переказів людям</div>
+          <div class="lbl" style="margin-top:2px;opacity:.6;font-size:10px">без переказів людям${Object.keys(byCat).some(c=>c!==TRANSFERS_CAT && state.catOff[c]) ? ' і вимкнених' : ''}</div>
         </div>
       </div>
       <div class="ms-legend" id="legendWrap"></div>
@@ -1934,14 +1944,26 @@ function resultsPanel(){
     const row = document.createElement('div');
     row.className='ms-legend-row ms-legend-row-clickable';
     const isTransfers = cat===TRANSFERS_CAT;
-    const pct = isTransfers ? '' : (cleanTotal ? ((Math.abs(sum)/Math.abs(cleanTotal))*100).toFixed(1)+'%' : '0.0%');
+    const off = !isTransfers && !!state.catOff[cat];
+    const pct = isTransfers || off ? '' : (cleanTotal ? ((Math.abs(sum)/Math.abs(cleanTotal))*100).toFixed(1)+'%' : '0.0%');
     const expanded = !!state.expandedCats[cat];
-    row.innerHTML = `<span class="ms-legend-chevron">${chev(expanded)}</span>
+    if(off) row.classList.add('is-off');
+    row.innerHTML = `${isTransfers ? '<span class="ms-legend-chk-space"></span>' : `<input type="checkbox" class="ms-legend-chk"${off?'':' checked'} title="${off?'Увімкнути':'Вимкнути'}: рахувати цю категорію в сумі та на діаграмі" aria-label="Рахувати категорію ${escapeHtml(cat)}">`}
+      <span class="ms-legend-chevron">${chev(expanded)}</span>
       <span class="ms-dot" style="background:${COLORS[cat]||'#666'}"></span>
       <span class="ms-legend-icon">${ICONS[cat]||'❓'}</span>
       <span class="ms-legend-cat">${cat}</span>
       <span class="ms-legend-amt">${fmt(sum)} ${curSym()}</span>
-      <span class="ms-legend-pct" title="${isTransfers?'Не входить у суму на діаграмі':''}">${isTransfers?'поза сумою':pct}</span>`;
+      <span class="ms-legend-pct" title="${isTransfers||off?'Не входить у суму на діаграмі':''}">${isTransfers||off?'поза сумою':pct}</span>`;
+    const chk = row.querySelector('.ms-legend-chk');
+    if(chk){
+      chk.addEventListener('click', e=>e.stopPropagation()); // the row itself unfolds the operations
+      chk.addEventListener('change', async e=>{
+        if(e.target.checked) delete state.catOff[cat]; else state.catOff[cat] = true;
+        render();
+        await storageSet('ms_catoff', JSON.stringify(state.catOff));
+      });
+    }
     row.addEventListener('click', ()=>{
       state.expandedCats[cat] = !state.expandedCats[cat];
       render();
@@ -1990,8 +2012,9 @@ function resultsPanel(){
   const panel2 = document.createElement('div');
   panel2.className='ms-panel';
   panel2.innerHTML = `<h2>Всі операції <span class="ms-h2-period">${periodLabel(state.from, state.to)}</span>
-      <button type="button" class="ms-icon-round" id="manualToggle" aria-expanded="${!!state.manualFormOpen}" aria-controls="manualForm" title="Додати витрату вручну" aria-label="Додати витрату вручну">
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+      <button type="button" class="ms-icon-round ms-manual-toggle" id="manualToggle" aria-expanded="${!!state.manualFormOpen}" aria-controls="manualForm" title="${state.manualFormOpen?'Закрити ручне введення':'Ручне введення: додати витрату'}" aria-label="Ручне введення витрати">
+        <svg class="ic-open" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>
+        <svg class="ic-close" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
       </button></h2><p class="ms-hint">Натисни на операцію, щоб змінити категорію (запам'ятається для цього мерчанта), прив'язати її до поїздки, позначити як «не витрата», вказати свою частку або додати нотатку.</p>
     <div class="ms-field" style="margin-bottom:10px">
       <input type="text" class="ms-search-input" id="txSearchInput" placeholder="Пошук за описом або власною нотаткою…" value="${escapeHtml(state.txSearchQuery||'')}">
@@ -2032,7 +2055,7 @@ function resultsPanel(){
     const color = COLORS[t.cat] || '#8C7A5C';
     const tripId = tripIdFor(t);
     const tripName = tripId ? (state.trips.find(x=>x.id===tripId)||{}).name : '';
-    const time = t.manual ? '' : t.date.toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'})+' · ';
+    const time = t.manual && !t.manualTime ? '' : t.date.toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'})+' · ';
     const foreign = !t.manual && t.currency && t.currency!==curCode() && t.operationAmount;
     row.innerHTML = `
       <span class="ms-txicon" style="background:${color}22;color:${color}">${ICONS[t.cat]||'•'}</span>
@@ -2204,6 +2227,7 @@ function resultsPanel(){
     <div class="ms-ops-manual-title">Додати готівкову витрату вручну</div>
     <div class="ms-manual-form">
       <div class="ms-field" style="max-width:140px"><label>Дата</label><input type="date" id="mDate" value="${todayStr()}"></div>
+      <div class="ms-field" style="max-width:110px"><label>Час</label><input type="time" id="mTime" value="${nowHM()}"></div>
       <div class="ms-field" style="flex:2"><label>Опис</label><input type="text" id="mDesc" placeholder="Наприклад: канцтовари"></div>
       <div class="ms-field" style="max-width:110px"><label>Сума</label><input type="text" id="mAmount" placeholder="250"></div>
       <div class="ms-field" style="max-width:100px"><label>Валюта</label>
@@ -2218,6 +2242,7 @@ function resultsPanel(){
   `;
   panel3.querySelector('#mAdd').addEventListener('click', ()=>{
     const d = panel3.querySelector('#mDate').value;
+    const tm = panel3.querySelector('#mTime').value || nowHM();
     const desc = panel3.querySelector('#mDesc').value.trim();
     const amtRaw = panel3.querySelector('#mAmount').value;
     const amt = parseFloat(amtRaw.replace(',','.'));
@@ -2231,7 +2256,7 @@ function resultsPanel(){
     // entries doesn't need to know about currencies at all
     const amtUah = curCodeChosen===980 ? amt : (amt*TO_EUR_RATE[curCodeChosen])/TO_EUR_RATE[980];
     const descWithCur = curCodeChosen===980 ? desc : `${desc} (${fmt(amt)} ${MANUAL_CURRENCIES.find(c=>c.code===curCodeChosen).label.split(' ')[1]})`;
-    state.manual.push({date:d, desc:descWithCur, amount:-Math.abs(amtUah), cat});
+    state.manual.push({date:d, time:tm, desc:descWithCur, amount:-Math.abs(amtUah), cat});
     persistManual();
     panel3.querySelector('#mDesc').value = '';
     panel3.querySelector('#mAmount').value = '';
@@ -2242,6 +2267,7 @@ function resultsPanel(){
     state.manualFormOpen = !state.manualFormOpen;
     panel3.hidden = !state.manualFormOpen;
     e.currentTarget.setAttribute('aria-expanded', String(state.manualFormOpen));
+    e.currentTarget.title = state.manualFormOpen ? 'Закрити ручне введення' : 'Ручне введення: додати витрату';
     if(state.manualFormOpen) panel3.querySelector('#mDesc').focus();
   });
 
@@ -2578,10 +2604,13 @@ function buildBalancePanel(){
     const accCb = (anchor ? anchor.amount : 0) + allCache.filter(it=>it.time>since).reduce((sum,it)=>sum+(it.cashbackAmount||0)/100,0);
     if(accCb > 0.004 || anchor){
       const netCb = accCb * (1 - CASHBACK_TAX_RATE);
-      const tipText = 'Кешбек після податку, який буде зараховано на картку';
-      cashbackPill = `<div class="ms-bc-cashback">
+      // Monobank pays cashback out only from 100 ₴ — below that it's shown muted, with the reason in the tooltip
+      const ready = accCb >= 100;
+      const tipText = ready ? 'Кешбек після податку, який буде зараховано на картку'
+        : `Кешбек ще менше 100 ₴ (${fmt(accCb)} ₴) — вивести на картку можна від 100 ₴`;
+      cashbackPill = `<div class="ms-bc-cashback${ready?'':' is-low'}">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v4h-4"/><path d="M9.5 9.5h3.2a1.6 1.6 0 0 1 0 3.2h-1.4a1.6 1.6 0 0 0 0 3.2h3.2M12 8v1.5M12 15.9v1.6"/></svg>
-          <span class="ms-bc-cb-net">${fmt(netCb)} ${curSym()}</span>
+          <span class="ms-bc-cb-net">${fmt(ready ? netCb : accCb)} ${curSym()}</span>${ready ? '' : '<span class="ms-bc-cb-low">&lt; 100</span>'}
           <span class="ms-bc-cb-info" tabindex="0" role="img" aria-label="${tipText}" data-tip="${tipText}">i</span>
         </div>`;
     }
@@ -3439,7 +3468,29 @@ function buildTripsPanel(all){
 // added here, and a rename changes the name everywhere (lists, charts, saved choices).
 const PENCIL_ICON = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>`;
 let editingCat = null; // category whose name is being edited inline
-const EMOJI_CHOICES = ['🧺','🛒','🍞','🥦','🍎','🍽️','☕','🍕','🍷','🍺','🚕','🚌','🚎','🚆','✈️','🚗','⛽','🅿️','🏠','💡','📶','📱','💻','👗','👟','💅','💇','🏬','💊','💉','🩺','🧘','🏋️','⚽','🎉','🎬','🎮','📚','🎓','🎁','🐶','👶','🤝','💵','💳','🧾','💼','🏦','✂️','🛠️','🧳','🏖️','🏷️','❓'];
+const EMOJI_CHOICES = [
+  '🧺','🛒','🍞','🥐','🥦','🍎','🍓','🥩','🧀','🥛','🍫','🍬','🍽️','🍔','🍕','🍣','🍜','🥗','☕','🧋','🍷','🍺','🍸','🥂',
+  '🚕','🚌','🚎','🚆','🚇','🚲','🛴','✈️','🚢','🚗','⛽','🅿️','🔧','🧳','🏖️','🏔️','🏨','🗺️',
+  '🏠','🛋️','💡','🔥','💧','🧹','🧺','📶','📱','💻','🖥️','🎧','📺','📦',
+  '👗','👕','👖','👟','👜','💍','👓','💄','💅','💇','🧴','🪒','🏬',
+  '💊','💉','🩺','🦷','🏥','🧘','🏋️','🏃','⚽','🎾','🏊','🧗',
+  '🎉','🎬','🎭','🎨','🎵','🎮','🎲','📚','🎓','✏️','🎁','💐','🎂','🎄',
+  '🐶','🐱','🐾','👶','🧸','👪','🤝','❤️','🙏',
+  '💵','💶','💳','🪙','💰','🧾','💼','🏦','📈','🧮','🛡️','✂️','🛠️','📄','🏷️','⭐','❓'
+].filter((e,i,a)=>a.indexOf(e)===i);
+// The emoji grid (+ a field for any other emoji) used when adding or editing a category.
+function emojiPickerHtml(chosen){
+  return `<div class="ms-emoji-pick" role="radiogroup" aria-label="Іконка категорії">
+    ${EMOJI_CHOICES.map(e=>`<button type="button" class="ms-emoji${e===chosen?' is-on':''}" role="radio" aria-checked="${e===chosen}" data-emoji="${e}">${e}</button>`).join('')}
+    <input type="text" class="ms-emoji-own" maxlength="4" placeholder="своє" aria-label="Своє емодзі">
+  </div>`;
+}
+function bindEmojiPicker(root, onPick){
+  const mark = e=>root.querySelectorAll('.ms-emoji').forEach(b=>{ const on = b.dataset.emoji===e; b.classList.toggle('is-on', on); b.setAttribute('aria-checked', String(on)); });
+  root.querySelectorAll('.ms-emoji').forEach(b=>b.addEventListener('click', ()=>{ root.querySelector('.ms-emoji-own').value=''; mark(b.dataset.emoji); onPick(b.dataset.emoji); }));
+  root.querySelector('.ms-emoji-own').addEventListener('input', e=>{ const v = e.target.value.trim(); if(v){ mark(v); onPick(v); } });
+}
+let newCatIcon = '🏷️', newCatPickerOpen = false; // the add-category form's emoji
 function buildCustomCategoryPanel(){
   const p = document.createElement('div');
   p.className='ms-panel ms-catman';
@@ -3451,9 +3502,11 @@ function buildCustomCategoryPanel(){
     <h2>Менеджер категорій</h2>
     <p class="ms-hint">Нова категорія одразу зʼявляється у всіх списках вибору. Олівець — змінити назву та іконку. Якщо перейменувати категорію, нова назва застосується всюди: в операціях, діаграмі, поїздках, пошуку і для вже збережених виборів.</p>
     <div class="ms-manual-form ms-catman-add">
-      <div class="ms-field" style="max-width:70px"><label for="ccIcon">Іконка</label><input type="text" id="ccIcon" placeholder="🏷️" maxlength="4"></div>
+      <div class="ms-field ms-catman-icon-field"><label>Іконка</label>
+        <button type="button" class="ms-catman-icon-btn" id="ccIconBtn" aria-expanded="${newCatPickerOpen}" aria-controls="ccPicker" title="Вибрати іконку">${escapeHtml(newCatIcon)}${chev(newCatPickerOpen)}</button></div>
       <div class="ms-field" style="flex:2"><label for="ccName">Нова категорія</label><input type="text" id="ccName" placeholder="Наприклад: хобі"></div>
       <button class="ms-btn" id="ccAdd" style="align-self:flex-end">Додати</button>
+      <div id="ccPicker" class="ms-catman-newpick"${newCatPickerOpen?'':' hidden'}>${emojiPickerHtml(newCatIcon)}</div>
     </div>
     <div class="ms-catman-count">${CATS.length} категорій</div>
     <div id="ccList" class="ms-catman-list"></div>
@@ -3471,18 +3524,10 @@ function buildCustomCategoryPanel(){
         <input type="text" class="ms-catman-input" value="${escapeHtml(name)}" aria-label="Нова назва категорії ${escapeHtml(name)}">
         <button type="button" class="ms-btn" data-act="save">Зберегти</button>
         <button type="button" class="ms-btn secondary" data-act="cancel">Скасувати</button>
-        <div class="ms-emoji-pick" role="radiogroup" aria-label="Іконка категорії">
-          ${EMOJI_CHOICES.map(e=>`<button type="button" class="ms-emoji${e===chosen?' is-on':''}" role="radio" aria-checked="${e===chosen}" data-emoji="${e}">${e}</button>`).join('')}
-          <input type="text" class="ms-emoji-own" maxlength="4" placeholder="своє" aria-label="Своє емодзі">
-        </div>`;
+        ${emojiPickerHtml(chosen)}`;
       const input = row.querySelector('.ms-catman-input');
       const preview = row.querySelector('[data-role="preview"]');
-      const pick = e=>{
-        chosen = e; preview.textContent = e;
-        row.querySelectorAll('.ms-emoji').forEach(b=>{ const on = b.dataset.emoji===e; b.classList.toggle('is-on', on); b.setAttribute('aria-checked', String(on)); });
-      };
-      row.querySelectorAll('.ms-emoji').forEach(b=>b.addEventListener('click', ()=>{ row.querySelector('.ms-emoji-own').value=''; pick(b.dataset.emoji); }));
-      row.querySelector('.ms-emoji-own').addEventListener('input', e=>{ const v = e.target.value.trim(); if(v) pick(v); });
+      bindEmojiPicker(row, e=>{ chosen = e; preview.textContent = e; });
       const save = async ()=>{
         const res = await renameCategory(name, input.value);
         if(res==='exists'){ alert('Категорія з такою назвою вже є.'); input.focus(); return; }
@@ -3507,10 +3552,19 @@ function buildCustomCategoryPanel(){
   });
   const add = async ()=>{
     const name = p.querySelector('#ccName').value;
-    const icon = p.querySelector('#ccIcon').value || '🏷️';
+    const icon = newCatIcon;
+    newCatIcon = '🏷️'; newCatPickerOpen = false;
     const ok = await addCustomCategory(name, icon);
-    if(!ok) alert('Категорія з такою назвою вже є, або назва порожня.');
+    if(!ok){ newCatIcon = icon; alert('Категорія з такою назвою вже є, або назва порожня.'); }
   };
+  const iconBtn = p.querySelector('#ccIconBtn'), picker = p.querySelector('#ccPicker');
+  iconBtn.addEventListener('click', ()=>{
+    newCatPickerOpen = !newCatPickerOpen;
+    picker.hidden = !newCatPickerOpen;
+    iconBtn.setAttribute('aria-expanded', String(newCatPickerOpen));
+    iconBtn.querySelector('.ms-chev').classList.toggle('is-open', newCatPickerOpen);
+  });
+  bindEmojiPicker(picker, e=>{ newCatIcon = e; iconBtn.firstChild.textContent = e; });
   p.querySelector('#ccAdd').addEventListener('click', add);
   p.querySelector('#ccName').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); add(); } });
   return p;

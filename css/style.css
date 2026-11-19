@@ -512,7 +512,7 @@
   .ms-header-btn:hover{background:#A3742F;}
   .ms-header-btn:focus-visible{outline:2px solid var(--text);outline-offset:2px;}
 
-  .ms-hero-head{margin:0 0 32px;display:flex;align-items:flex-end;justify-content:space-between;gap:16px 32px;}
+  .ms-hero-head{margin:0 0 32px;display:flex;align-items:flex-start;justify-content:space-between;gap:16px 32px;}
   .ms-hero-text{min-width:0;}
   .ms-hero-side{flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-end;}
   .ms-hero-side:empty{display:none;}
@@ -689,3 +689,30 @@
     .ms-catman-row.is-editing .ms-catman-input{flex:1 1 calc(100% - 50px);}
     .ms-emoji-pick{padding-left:0;}
   }
+
+  /* cashback under 100 ₴ (Monobank pays out from 100): muted, with a small "< 100" */
+  .ms-bc-cashback.is-low .ms-bc-cb-net{color:rgba(255,255,255,0.6);}
+  .ms-bc-cashback.is-low svg{color:rgba(232,196,106,0.55);}
+  .ms-bc-cb-low{font-size:10px;letter-spacing:.04em;color:rgba(255,255,255,0.5);border:1px solid rgba(255,255,255,0.22);border-radius:6px;padding:1px 4px;}
+
+  /* "Всі операції": pencil (manual entry) turns into ✕ while the form is open */
+  .ms-manual-toggle .ic-close{display:none;}
+  .ms-manual-toggle[aria-expanded="true"] .ic-open{display:none;}
+  .ms-manual-toggle[aria-expanded="true"] .ic-close{display:block;}
+  .ms-manual-toggle[aria-expanded="true"]{background:#EFDDB8;}
+
+  /* "Загальна картина": switch a category on/off */
+  .ms-legend-chk{margin:0;width:16px;height:16px;accent-color:var(--gold);cursor:pointer;flex-shrink:0;}
+  .ms-legend-chk-space{width:16px;flex-shrink:0;}
+  .ms-legend-row.is-off .ms-legend-cat,.ms-legend-row.is-off .ms-legend-amt,.ms-legend-row.is-off .ms-legend-icon,.ms-legend-row.is-off .ms-dot{opacity:.4;}
+  .ms-legend-row.is-off .ms-legend-amt{text-decoration:line-through;}
+
+  /* Менеджер категорій: icon button + grid for a new category */
+  .ms-catman-icon-field{flex:0 0 auto !important;min-width:0 !important;}
+  .ms-catman-icon-btn{display:inline-flex;align-items:center;gap:6px;height:38px;padding:0 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);
+    font-size:18px;color:var(--muted);cursor:pointer;}
+  .ms-catman-icon-btn:hover,.ms-catman-icon-btn[aria-expanded="true"]{border-color:var(--gold);}
+  .ms-catman-icon-btn:focus-visible{outline:2px solid var(--gold);outline-offset:2px;}
+  .ms-catman-newpick{flex:1 1 100%;}
+  .ms-catman-newpick[hidden]{display:none;}
+  .ms-catman-newpick .ms-emoji-pick{padding-left:0;}
