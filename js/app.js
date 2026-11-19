@@ -3286,6 +3286,26 @@ const moneyQuotes = [
 const quoteEl = document.getElementById('ms-quote');
 if(quoteEl) quoteEl.textContent = moneyQuotes[Math.floor(Math.random() * moneyQuotes.length)];
 
+// ---------- light / dark theme ----------
+// The choice is kept on this device (localStorage) — the inline script in <head> applies it
+// before the page is drawn; with no choice the theme follows the device setting.
+(function(){
+  const btn = document.getElementById('themeBtn');
+  if(!btn) return;
+  const sync = ()=>{
+    const dark = document.documentElement.dataset.theme==='dark';
+    btn.setAttribute('aria-pressed', String(dark));
+    btn.title = dark ? 'Світла тема' : 'Темна тема';
+  };
+  btn.addEventListener('click', ()=>{
+    const next = document.documentElement.dataset.theme==='dark' ? 'light' : 'dark';
+    document.documentElement.dataset.theme = next;
+    try{ localStorage.setItem('monostat_theme', next); }catch(e){}
+    sync();
+  });
+  sync();
+})();
+
 // ---------- init ----------
 window.MonoStatDefaults.DEFAULT_CUSTOM_CATS.forEach(c=>applyCustomCategory(c, true));
 if(IS_DEMO){ startDemo(); } else initAuth().then(()=>{
