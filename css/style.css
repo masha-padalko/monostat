@@ -679,3 +679,8 @@
   /* Менеджер категорій: delete */
   .ms-catman-del:hover{color:var(--danger);border-color:var(--danger);}
   .ms-catman-del-space{flex:0 0 34px;width:34px;}
+  /* "Регулярні платежі": monthly total */
+  .ms-rec-total{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:2px 12px;margin-top:12px;padding:12px 12px 0;border-top:1px solid var(--line);}
+  .ms-rec-total span{font-size:13px;color:var(--muted);}
+  .ms-rec-total b{font-family:var(--font-mono);font-size:17px;color:var(--text);}
+  .ms-rec-total small{flex:1 1 100%;font-size:11px;color:var(--muted);}

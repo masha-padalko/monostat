@@ -2352,7 +2352,18 @@ function buildRecurringPaymentsPanel(){
 
   if(!rows.length){ p.hidden = true; return p; }
 
-  p.innerHTML = `<h2>Регулярні платежі</h2><p class="ms-hint">Орієнтовна дата наступного платежу — останній платіж + місяць. Це не справжнє push-сповіщення (сайт без сервера не може надіслати його, поки застосунок закритий) — просто попередження тут, коли відкриваєш застосунок ближче до дати.</p><div id="recurringRows"></div>`;
+  // monthly total of the active subscriptions (an overdue one may be cancelled — not counted),
+  // and how much of it has already been charged this calendar month
+  const active = rows.filter(r=>r.daysLeft>=0);
+  const monthTotal = active.reduce((sum,r)=>sum+r.lastAmt, 0);
+  const now0 = new Date();
+  const paidThisMonth = active.filter(r=>r.lastDate.getFullYear()===now0.getFullYear() && r.lastDate.getMonth()===now0.getMonth()).reduce((sum,r)=>sum+r.lastAmt, 0);
+  const overdueCount = rows.length - active.length;
+  p.innerHTML = `<h2>Регулярні платежі</h2><p class="ms-hint">Орієнтовна дата наступного платежу — останній платіж + місяць. Це не справжнє push-сповіщення (сайт без сервера не може надіслати його, поки застосунок закритий) — просто попередження тут, коли відкриваєш застосунок ближче до дати.</p><div id="recurringRows"></div>
+    <div class="ms-rec-total">
+      <span>Разом на місяць</span><b>${fmt(monthTotal)} ${curSym()}</b>
+      <small>${paidThisMonth ? `уже списано цього місяця ${fmt(paidThisMonth)} ${curSym()}` : 'цього місяця ще нічого не списано'}${overdueCount ? ` · без прострочених (${overdueCount})` : ''}</small>
+    </div>`;
   const wrap = p.querySelector('#recurringRows');
   rows.forEach(r=>{
     const soon = r.daysLeft<=2;
