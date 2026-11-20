@@ -216,9 +216,18 @@ function categorize(desc, mcc, amount, overrides, rules){
 // "тільки цю покупку") always wins over the merchant-wide rule, so recategorizing one
 // odd purchase (e.g. a supermarket run that was actually entertainment) doesn't drag
 // every other purchase from that same store along with it.
+// A 26-lei purchase at Lidl or Mega Image is her usual "others (T)" — goes there by itself
+// (her choice for that one purchase still wins; the rule is off if that category doesn't exist).
+const T_CAT = 'others (T)';
+function isTypicalTPurchase(t){
+  const d = (t.desc||'').toLowerCase();
+  return t.currency===946 && Math.abs(Math.abs(t.operationAmount||0)-26) < 0.5
+    && (d.includes('lidl') || d.includes('mega image') || d.includes('megaimage'));
+}
 function categoryFor(t){
   const override = state.txCategoryOverride[txKey(t)];
   if(override) return override;
+  if(isTypicalTPurchase(t) && CATS.includes(T_CAT)) return T_CAT;
   return categorize(t.desc, t.mcc, t.amount, state.overrides, state.rules);
 }
 
@@ -1628,7 +1637,8 @@ function buildDayTxList(label, list){
     chk.addEventListener('change', e=>toggleDayExcluded(key, e.target.checked));
     const icon = document.createElement('span');
     icon.className = 'ms-legend-icon';
-    icon.textContent = ICONS[t.cat] || '❓';
+    if(/lidl/i.test(t.desc) && !t.manual) icon.innerHTML = '<img class="ms-shop-logo" src="img/lidl.png" alt="Lidl" width="18" height="18">';
+    else icon.textContent = ICONS[t.cat] || '❓';
     const time = document.createElement('span');
     time.style.color = 'var(--muted)';
     time.style.fontFamily = 'var(--font-mono)';
@@ -1882,7 +1892,9 @@ function resultsPanel(){
     const time = t.manual && !t.manualTime ? '' : t.date.toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'})+' · ';
     const foreign = !t.manual && t.currency && t.currency!==curCode() && t.operationAmount;
     row.innerHTML = `
-      <span class="ms-txicon" style="background:${color}22;color:${color}">${ICONS[t.cat]||'•'}</span>
+      ${/lidl/i.test(t.desc) && !t.manual
+        ? '<span class="ms-txicon ms-txlogo" title="Lidl"><img src="img/lidl.png" alt="" width="36" height="36"></span>'
+        : `<span class="ms-txicon" style="background:${color}22;color:${color}">${ICONS[t.cat]||'•'}</span>`}
       <span class="ms-txmain">
         <span class="ms-txdesc"></span>
         <span class="ms-txsub">${time}${escapeHtml(t.cat)}${tripName?` · ✈️ ${escapeHtml(tripName)}`:''}${isNotExpense?' · не витрата':''}</span>

@@ -684,3 +684,7 @@
   .ms-rec-total span{font-size:13px;color:var(--muted);}
   .ms-rec-total b{font-family:var(--font-mono);font-size:17px;color:var(--text);}
   .ms-rec-total small{flex:1 1 100%;font-size:11px;color:var(--muted);}
+  /* shop logo instead of the category emoji (Lidl) */
+  .ms-txlogo{overflow:hidden;background:none;}
+  .ms-txlogo img{width:100%;height:100%;object-fit:cover;display:block;}
+  .ms-shop-logo{width:18px;height:18px;border-radius:50%;display:block;margin:0 auto;}
